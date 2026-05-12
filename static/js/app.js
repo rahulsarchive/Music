@@ -23,6 +23,23 @@
     });
     window.__openChordBuilder = () => builder.show();
 
+    const progBuilder = new window.ProgressionBuilder({
+      modalEl: document.getElementById("progression-builder-modal"),
+      paletteEl: document.getElementById("prog-builder-palette"),
+      searchEl: document.getElementById("prog-builder-search"),
+      sequenceEl: document.getElementById("prog-builder-sequence"),
+      nameInput: document.getElementById("prog-builder-name"),
+      tsSelect: document.getElementById("prog-builder-ts"),
+      bpcSelect: document.getElementById("prog-builder-bpc"),
+      saveBtn: document.getElementById("prog-builder-save"),
+      cancelBtn: document.getElementById("prog-builder-cancel"),
+      closeBtn: document.getElementById("prog-builder-close"),
+      onSave: async () => {
+        await practice.loadData();
+      },
+    });
+    window.__openProgressionBuilder = () => progBuilder.show();
+
     await Promise.all([
       practice.loadData(),
       window.History.refresh(),

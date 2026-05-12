@@ -83,6 +83,37 @@ def init_db() -> None:
             );
 
             CREATE INDEX IF NOT EXISTS idx_session_started ON session(started_at);
+
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS routine_module (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                grade INTEGER NOT NULL,
+                position INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS routine_exercise (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                module_id INTEGER NOT NULL,
+                position INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                instructions TEXT,
+                target_type TEXT,
+                target_id INTEGER,
+                default_bpm INTEGER NOT NULL DEFAULT 80,
+                default_duration_seconds INTEGER NOT NULL DEFAULT 60,
+                default_time_signature TEXT NOT NULL DEFAULT '4/4',
+                default_bars_per_chord INTEGER NOT NULL DEFAULT 1,
+                completed_at TEXT,
+                FOREIGN KEY (module_id) REFERENCES routine_module(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_re_module ON routine_exercise(module_id);
             """
         )
         conn.commit()
@@ -206,10 +237,22 @@ def create_progression():
     chord_ids = data.get("chord_ids")
     if not name or not isinstance(chord_ids, list) or not chord_ids:
         return jsonify({"error": "name and chord_ids required"}), 400
+
+    time_signature = data.get("time_signature") or "4/4"
+    if time_signature not in ("4/4", "3/4", "6/8"):
+        return jsonify({"error": "time_signature must be 4/4, 3/4, or 6/8"}), 400
+    try:
+        bars_per_chord = int(data.get("bars_per_chord", 1))
+    except (TypeError, ValueError):
+        return jsonify({"error": "bars_per_chord must be an integer"}), 400
+    if bars_per_chord not in (1, 2, 4):
+        return jsonify({"error": "bars_per_chord must be 1, 2, or 4"}), 400
+
     db = get_db()
     cur = db.execute(
-        "INSERT INTO progression (name, is_custom) VALUES (?, 1)",
-        (name,),
+        "INSERT INTO progression (name, time_signature, bars_per_chord, is_custom) "
+        "VALUES (?, ?, ?, 1)",
+        (name, time_signature, bars_per_chord),
     )
     pid = cur.lastrowid
     for pos, cid in enumerate(chord_ids):
@@ -219,6 +262,84 @@ def create_progression():
         )
     db.commit()
     return jsonify({"id": pid}), 201
+
+
+@app.route("/api/progressions/<int:prog_id>", methods=["DELETE"])
+def delete_progression(prog_id: int):
+    db = get_db()
+    row = db.execute(
+        "SELECT is_custom FROM progression WHERE id=?", (prog_id,)
+    ).fetchone()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    if not row["is_custom"]:
+        return jsonify({"error": "cannot delete seed progression"}), 400
+    ref = db.execute(
+        "SELECT 1 FROM session WHERE target_type='progression' AND target_id=? LIMIT 1",
+        (prog_id,),
+    ).fetchone()
+    if ref:
+        return jsonify({"error": "progression has logged sessions"}), 400
+    # progression_chord rows cascade-delete via FK.
+    db.execute("DELETE FROM progression WHERE id=?", (prog_id,))
+    db.commit()
+    return ("", 204)
+
+
+@app.route("/api/routines", methods=["GET"])
+def list_routines():
+    db = get_db()
+    modules = db.execute(
+        "SELECT * FROM routine_module ORDER BY grade, position"
+    ).fetchall()
+    result = []
+    for m in modules:
+        exercises = db.execute(
+            """
+            SELECT e.*,
+                   CASE e.target_type
+                       WHEN 'chord' THEN (SELECT display_name FROM chord WHERE id=e.target_id)
+                       WHEN 'progression' THEN (SELECT name FROM progression WHERE id=e.target_id)
+                   END AS target_name
+            FROM routine_exercise e
+            WHERE e.module_id = ?
+            ORDER BY e.position
+            """,
+            (m["id"],),
+        ).fetchall()
+        result.append({
+            "id": m["id"],
+            "grade": m["grade"],
+            "position": m["position"],
+            "title": m["title"],
+            "description": m["description"],
+            "exercises": [dict(e) for e in exercises],
+        })
+    return jsonify(result)
+
+
+@app.route("/api/routines/exercises/<int:ex_id>/complete", methods=["POST"])
+def set_exercise_completed(ex_id: int):
+    data = request.get_json(force=True)
+    completed = bool(data.get("completed", True))
+    db = get_db()
+    row = db.execute("SELECT 1 FROM routine_exercise WHERE id=?", (ex_id,)).fetchone()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    if completed:
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "UPDATE routine_exercise SET completed_at=? WHERE id=?", (now, ex_id)
+        )
+    else:
+        db.execute(
+            "UPDATE routine_exercise SET completed_at=NULL WHERE id=?", (ex_id,)
+        )
+    db.commit()
+    updated = db.execute(
+        "SELECT id, completed_at FROM routine_exercise WHERE id=?", (ex_id,)
+    ).fetchone()
+    return jsonify({"id": updated["id"], "completed_at": updated["completed_at"]})
 
 
 @app.route("/api/sessions", methods=["GET"])
@@ -320,19 +441,15 @@ def summary():
     return jsonify({"week_seconds": int(week_total), "streak_days": streak})
 
 
-def _is_seeded(conn: sqlite3.Connection) -> bool:
-    row = conn.execute("SELECT 1 FROM chord LIMIT 1").fetchone()
-    return row is not None
-
-
 def ensure_seeded() -> None:
     init_db()
-    with closing(sqlite3.connect(DB_PATH)) as conn:
-        if _is_seeded(conn):
-            return
     # Lazy import so seed.py can import app.DB_PATH back if needed.
-    from seed import seed
-    seed(DB_PATH)
+    from seed import seed_v1, seed_v2
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        seed_v1(conn)
+        seed_v2(conn)
+        conn.commit()
 
 
 if __name__ == "__main__":

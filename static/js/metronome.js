@@ -41,6 +41,7 @@
       this.schedulerId = null;
       this.animId = null;
       this.isRunning = false;
+      this.muted = false;
 
       this._buildSvg();
     }
@@ -165,7 +166,12 @@
       }
     }
 
+    setMuted(muted) {
+      this.muted = !!muted;
+    }
+
     _scheduleClick(time, accented) {
+      if (this.muted) return;
       const ctx = this.audioCtx;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();

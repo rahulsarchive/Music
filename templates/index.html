@@ -46,9 +46,13 @@
         <div class="tabs">
           <button class="tab active" data-tab="chord">Chords</button>
           <button class="tab" data-tab="progression">Progressions</button>
+          <button class="tab" data-tab="routines">Routines</button>
         </div>
         <div id="chord-grid" class="grid"></div>
         <div id="progression-grid" class="grid hidden"></div>
+        <div id="routines-tab" class="routines hidden">
+          <div id="routines-content"></div>
+        </div>
       </div>
 
       <div class="controls">
@@ -74,6 +78,14 @@
             <option value="2">2</option>
             <option value="4">4</option>
           </select>
+        </div>
+        <div class="control">
+          <label>Sound</label>
+          <div class="audio-mode-group" role="group" aria-label="Metronome sound mode">
+            <button class="audio-mode-btn" data-mode="tick" type="button">Tick</button>
+            <button class="audio-mode-btn" data-mode="chord" type="button">Chord</button>
+            <button class="audio-mode-btn active" data-mode="both" type="button">Both</button>
+          </div>
         </div>
       </div>
 
@@ -132,6 +144,55 @@
     </div>
   </div>
 
+  <!-- ============ PROGRESSION BUILDER MODAL ============ -->
+  <div id="progression-builder-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content prog-builder">
+      <div class="modal-header">
+        <h3>Build progression</h3>
+        <button class="modal-close" id="prog-builder-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="prog-builder-row">
+          <div class="prog-builder-col">
+            <label for="prog-builder-search">Available chords</label>
+            <input type="text" id="prog-builder-search" placeholder="Search…" />
+            <div id="prog-builder-palette" class="prog-palette"></div>
+          </div>
+          <div class="prog-builder-col">
+            <label>Progression (drag to reorder)</label>
+            <div id="prog-builder-sequence" class="prog-sequence"></div>
+          </div>
+        </div>
+        <div class="prog-builder-meta">
+          <div class="control">
+            <label for="prog-builder-name">Name</label>
+            <input type="text" id="prog-builder-name" placeholder="e.g. My I-IV-V" maxlength="80" />
+          </div>
+          <div class="control">
+            <label for="prog-builder-ts">Time</label>
+            <select id="prog-builder-ts">
+              <option value="4/4">4/4</option>
+              <option value="3/4">3/4</option>
+              <option value="6/8">6/8</option>
+            </select>
+          </div>
+          <div class="control">
+            <label for="prog-builder-bpc">Bars / chord</label>
+            <select id="prog-builder-bpc">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="4">4</option>
+            </select>
+          </div>
+        </div>
+        <div class="builder-actions">
+          <button class="btn-secondary" id="prog-builder-cancel">Cancel</button>
+          <button class="btn-primary" id="prog-builder-save">Save progression</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ============ NOTES MODAL (post-session) ============ -->
   <div id="notes-modal" class="modal hidden" role="dialog" aria-modal="true">
     <div class="modal-content notes-modal">
@@ -152,6 +213,8 @@
 
   <script src="{{ url_for('static', filename='js/chord-diagram.js') }}"></script>
   <script src="{{ url_for('static', filename='js/chord-builder.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/progression-builder.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/chord-audio.js') }}"></script>
   <script src="{{ url_for('static', filename='js/metronome.js') }}"></script>
   <script src="{{ url_for('static', filename='js/history.js') }}"></script>
   <script src="{{ url_for('static', filename='js/practice.js') }}"></script>
