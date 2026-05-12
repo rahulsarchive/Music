@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Guitar Practice Tracker</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>Guitar Practice <span class="accent">Tracker</span></h1>
+    <div class="topstats">
+      <div class="stat"><div class="stat-label">This week</div><div class="stat-value" id="stat-week">0m</div></div>
+      <div class="stat"><div class="stat-label">Streak</div><div class="stat-value lime" id="stat-streak">0d</div></div>
+    </div>
+  </header>
+
+  <main>
+    <!-- ============ HISTORY SECTION ============ -->
+    <section class="card" id="history-section">
+      <h2>History</h2>
+      <div id="heatmap-wrap">
+        <div id="heatmap" aria-label="Practice activity heatmap"></div>
+        <div class="legend">
+          Less
+          <span class="legend-cell level-0"></span>
+          <span class="legend-cell level-1"></span>
+          <span class="legend-cell level-2"></span>
+          <span class="legend-cell level-3"></span>
+          <span class="legend-cell level-4"></span>
+          More
+        </div>
+      </div>
+
+      <h3>Recent sessions</h3>
+      <div id="sessions-list" class="sessions-list">
+        <div class="empty">No sessions yet — pick a chord below and hit play.</div>
+      </div>
+    </section>
+
+    <!-- ============ PRACTICE SECTION ============ -->
+    <section class="card" id="practice-section">
+      <h2>Practice</h2>
+
+      <div class="picker">
+        <div class="tabs">
+          <button class="tab active" data-tab="chord">Chords</button>
+          <button class="tab" data-tab="progression">Progressions</button>
+        </div>
+        <div id="chord-grid" class="grid"></div>
+        <div id="progression-grid" class="grid hidden"></div>
+      </div>
+
+      <div class="controls">
+        <div class="control">
+          <label for="bpm">BPM</label>
+          <div class="bpm-control">
+            <input type="range" id="bpm-slider" min="40" max="240" value="80" />
+            <input type="number" id="bpm" min="40" max="240" value="80" />
+          </div>
+        </div>
+        <div class="control">
+          <label for="time-sig">Time</label>
+          <select id="time-sig">
+            <option value="4/4">4/4</option>
+            <option value="3/4">3/4</option>
+            <option value="6/8">6/8</option>
+          </select>
+        </div>
+        <div class="control hidden" id="bars-per-chord-wrap">
+          <label for="bars-per-chord">Bars / chord</label>
+          <select id="bars-per-chord">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="4">4</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="bar-display" class="bar-display">
+        <svg id="bar-svg" viewBox="0 0 1000 80" preserveAspectRatio="none"></svg>
+      </div>
+
+      <div class="play-area">
+        <div class="now-playing">
+          <div class="current-wrap">
+            <div class="now-label">Now</div>
+            <div id="current-chord-name" class="current-name">—</div>
+            <svg id="current-chord-svg" class="chord-large" viewBox="0 0 140 170"></svg>
+          </div>
+          <div class="next-wrap" id="next-wrap">
+            <div class="now-label">Next</div>
+            <div id="next-chord-name" class="next-name">—</div>
+            <svg id="next-chord-svg" class="chord-small" viewBox="0 0 140 170"></svg>
+          </div>
+        </div>
+
+        <div class="play-controls">
+          <button id="play-btn" class="play-btn" disabled>Start</button>
+          <div class="timer" id="timer">00:00</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ CUSTOM CHORD MODAL ============ -->
+  <div id="chord-builder-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Add custom chord</h3>
+        <button class="modal-close" id="chord-builder-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="builder-row">
+          <svg id="builder-svg" viewBox="0 0 220 260"></svg>
+          <div class="builder-side">
+            <label for="builder-name">Name</label>
+            <input type="text" id="builder-name" placeholder="e.g. Csus4" maxlength="32" />
+
+            <label for="builder-text">Notation (low E → high E)</label>
+            <input type="text" id="builder-text" placeholder="x 3 3 0 1 1" />
+            <p class="hint">Use 0 for open, x for muted, or a fret number 1–24. Separate by spaces or commas.</p>
+
+            <p class="hint">Tip: click a string above its nut to toggle open / muted. Click on a fret to set its position.</p>
+            <div class="builder-actions">
+              <button class="btn-secondary" id="builder-clear">Clear</button>
+              <button class="btn-primary" id="builder-save">Save chord</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ NOTES MODAL (post-session) ============ -->
+  <div id="notes-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content notes-modal">
+      <div class="modal-header">
+        <h3>Session complete</h3>
+      </div>
+      <div class="modal-body">
+        <div id="notes-summary" class="notes-summary"></div>
+        <label for="notes-input">Notes (optional)</label>
+        <textarea id="notes-input" rows="4" placeholder="How did it feel? What still needs work?"></textarea>
+        <div class="builder-actions">
+          <button class="btn-secondary" id="notes-skip">Skip</button>
+          <button class="btn-primary" id="notes-save">Save session</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/chord-diagram.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/chord-builder.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/metronome.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/history.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/practice.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
