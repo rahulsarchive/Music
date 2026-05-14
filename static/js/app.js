@@ -2,6 +2,7 @@
 (function () {
   document.addEventListener("DOMContentLoaded", async () => {
     const practice = new window.Practice();
+    window._practiceInstance = practice;
 
     const metronome = new window.Metronome({
       svg: document.getElementById("bar-svg"),
@@ -19,6 +20,7 @@
       closeBtn: document.getElementById("chord-builder-close"),
       onSave: async () => {
         await practice.loadData();
+        sessionBuilder.setData(practice.chords, practice.progressions);
       },
     });
     window.__openChordBuilder = () => builder.show();
@@ -36,13 +38,19 @@
       closeBtn: document.getElementById("prog-builder-close"),
       onSave: async () => {
         await practice.loadData();
+        sessionBuilder.setData(practice.chords, practice.progressions);
       },
     });
     window.__openProgressionBuilder = () => progBuilder.show();
+
+    const sessionBuilder = new window.PracticeSessionBuilder();
 
     await Promise.all([
       practice.loadData(),
       window.History.refresh(),
     ]);
+
+    sessionBuilder.setData(practice.chords, practice.progressions);
+    await sessionBuilder.load();
   });
 })();

@@ -1,6 +1,7 @@
 /* History view: heatmap of last 365 days + recent sessions list + summary stats. */
 (function () {
-  const HEATMAP_DAYS = 364; // 52 weeks * 7 days
+  const HEATMAP_DAYS = 364;
+  const RECENT_LIMIT = 6;
 
   function pad2(n) { return n < 10 ? "0" + n : String(n); }
 
@@ -19,8 +20,7 @@
 
   function intensityLevel(sec) {
     if (!sec) return 0;
-    // Cube root scaling so short sessions still register.
-    const root = Math.cbrt(sec); // 60s -> ~3.9, 600s -> ~8.4, 3600s -> ~15.3
+    const root = Math.cbrt(sec);
     if (root < 3) return 1;
     if (root < 6) return 2;
     if (root < 10) return 3;
@@ -30,7 +30,7 @@
   async function refresh() {
     const [heatmapData, sessions, summary] = await Promise.all([
       fetch("/api/stats/heatmap?days=" + HEATMAP_DAYS).then((r) => r.json()),
-      fetch("/api/sessions?limit=50").then((r) => r.json()),
+      fetch("/api/sessions?limit=" + RECENT_LIMIT).then((r) => r.json()),
       fetch("/api/stats/summary").then((r) => r.json()),
     ]);
     renderHeatmap(heatmapData);
@@ -45,10 +45,8 @@
     const byDate = new Map();
     for (const r of data) byDate.set(r.date, r.total_seconds);
 
-    // Build a grid: columns are weeks (oldest -> newest), rows are days (Sun -> Sat).
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    // Go back HEATMAP_DAYS days. Then align to Sunday.
     const start = new Date(today);
     start.setDate(start.getDate() - HEATMAP_DAYS);
     while (start.getDay() !== 0) start.setDate(start.getDate() - 1);
@@ -65,48 +63,62 @@
       cell.title = sec
         ? `${iso} — ${fmtDuration(sec)}`
         : `${iso} — no practice`;
-      // Place into grid by row (day of week) and column (week index).
-      cell.style.gridRow = (cursor.getDay() + 1) + ""; // CSS grid is 1-indexed
+      cell.style.gridRow = (cursor.getDay() + 1) + "";
       container.appendChild(cell);
       cursor.setDate(cursor.getDate() + 1);
     }
   }
 
+  function buildSessionRow(s) {
+    const row = document.createElement("div");
+    row.className = "session-row";
+    const started = new Date(s.started_at);
+    const dateStr = started.toLocaleString(undefined, {
+      month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+    });
+    row.innerHTML = `
+      <div class="date"></div>
+      <div class="target"></div>
+      <div class="duration"></div>
+      <div class="bpm"></div>
+    `;
+    row.querySelector(".date").textContent = dateStr;
+    row.querySelector(".target").textContent = s.target_name || `(${s.target_type})`;
+    row.querySelector(".duration").textContent = fmtDuration(s.duration_seconds);
+    row.querySelector(".bpm").textContent = `${s.bpm} bpm`;
+    if (s.notes) {
+      const n = document.createElement("div");
+      n.className = "notes";
+      n.textContent = s.notes;
+      row.appendChild(n);
+    }
+    return row;
+  }
+
   function renderSessions(sessions) {
     const list = document.getElementById("sessions-list");
+    const footer = document.getElementById("sessions-footer");
     list.innerHTML = "";
+
     if (!sessions.length) {
       const e = document.createElement("div");
       e.className = "empty";
       e.textContent = "No sessions yet — pick a chord below and hit Start.";
       list.appendChild(e);
+      footer.classList.add("hidden");
       return;
     }
-    for (const s of sessions) {
-      const row = document.createElement("div");
-      row.className = "session-row";
-      const started = new Date(s.started_at);
-      const dateStr = started.toLocaleString(undefined, {
-        month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-      });
-      row.innerHTML = `
-        <div class="date"></div>
-        <div class="target"></div>
-        <div class="duration"></div>
-        <div class="bpm"></div>
-      `;
-      row.querySelector(".date").textContent = dateStr;
-      row.querySelector(".target").textContent = s.target_name || `(${s.target_type})`;
-      row.querySelector(".duration").textContent = fmtDuration(s.duration_seconds);
-      row.querySelector(".bpm").textContent = `${s.bpm} bpm`;
-      if (s.notes) {
-        const n = document.createElement("div");
-        n.className = "notes";
-        n.textContent = s.notes;
-        row.appendChild(n);
+
+    sessions.forEach((s, i) => {
+      const row = buildSessionRow(s);
+      // Fade the last 2 rows when there are 6
+      if (sessions.length >= RECENT_LIMIT && i >= RECENT_LIMIT - 2) {
+        row.classList.add("session-fade-" + (i - (RECENT_LIMIT - 2) + 1));
       }
       list.appendChild(row);
-    }
+    });
+
+    footer.classList.remove("hidden");
   }
 
   function renderSummary(summary) {
@@ -114,6 +126,37 @@
     document.getElementById("stat-week").textContent = `${weekMin}m`;
     document.getElementById("stat-streak").textContent = `${summary.streak_days}d`;
   }
+
+  // All sessions modal
+  function wireAllSessions() {
+    const btn = document.getElementById("all-sessions-btn");
+    const modal = document.getElementById("all-sessions-modal");
+    const closeBtn = document.getElementById("all-sessions-close");
+
+    btn.addEventListener("click", async () => {
+      const sessions = await fetch("/api/sessions?limit=500").then((r) => r.json());
+      const list = document.getElementById("all-sessions-list");
+      list.innerHTML = "";
+      if (!sessions.length) {
+        const e = document.createElement("div");
+        e.className = "empty";
+        e.textContent = "No sessions yet.";
+        list.appendChild(e);
+      } else {
+        for (const s of sessions) {
+          list.appendChild(buildSessionRow(s));
+        }
+      }
+      modal.classList.remove("hidden");
+    });
+
+    closeBtn.addEventListener("click", () => modal.classList.add("hidden"));
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) modal.classList.add("hidden");
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", wireAllSessions);
 
   window.History = { refresh };
 })();

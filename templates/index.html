@@ -36,6 +36,9 @@
       <div id="sessions-list" class="sessions-list">
         <div class="empty">No sessions yet — pick a chord below and hit play.</div>
       </div>
+      <div id="sessions-footer" class="sessions-footer hidden">
+        <button class="btn-secondary btn-small" id="all-sessions-btn">All sessions</button>
+      </div>
     </section>
 
     <!-- ============ PRACTICE SECTION ============ -->
@@ -46,12 +49,65 @@
         <div class="tabs">
           <button class="tab active" data-tab="chord">Chords</button>
           <button class="tab" data-tab="progression">Progressions</button>
-          <button class="tab" data-tab="routines">Routines</button>
+          <button class="tab" data-tab="practice-builder">Practice Sessions</button>
         </div>
-        <div id="chord-grid" class="grid"></div>
-        <div id="progression-grid" class="grid hidden"></div>
-        <div id="routines-tab" class="routines hidden">
-          <div id="routines-content"></div>
+
+        <!-- Chord tab -->
+        <div id="chord-tab-content">
+          <div class="category-bar" id="chord-category-bar">
+            <button class="cat-pill active" data-cat-id="all">All</button>
+            <button class="cat-add-btn" id="chord-cat-add-btn" title="New category">+ Category</button>
+          </div>
+          <div class="category-actions hidden" id="chord-cat-actions">
+            <span class="cat-actions-label" id="chord-cat-actions-label"></span>
+            <button class="btn-secondary btn-small" id="chord-cat-add-chords-btn">+ Add chords</button>
+            <button class="btn-danger btn-small" id="chord-cat-delete-btn">Delete category</button>
+          </div>
+          <div id="chord-grid" class="grid"></div>
+        </div>
+
+        <!-- Progression tab -->
+        <div id="progression-tab-content" class="hidden">
+          <div class="category-bar" id="prog-category-bar">
+            <button class="cat-pill active" data-cat-id="all">All</button>
+            <button class="cat-add-btn" id="prog-cat-add-btn" title="New category">+ Category</button>
+          </div>
+          <div class="category-actions hidden" id="prog-cat-actions">
+            <span class="cat-actions-label" id="prog-cat-actions-label"></span>
+            <button class="btn-secondary btn-small" id="prog-cat-add-progs-btn">+ Add progressions</button>
+            <button class="btn-danger btn-small" id="prog-cat-delete-btn">Delete category</button>
+          </div>
+          <div id="progression-grid" class="grid"></div>
+        </div>
+
+        <!-- Practice Session Builder tab -->
+        <div id="practice-builder-tab" class="practice-builder hidden">
+          <div class="pb-layout">
+            <div class="pb-sessions-panel">
+              <div class="pb-panel-header">
+                <span class="pb-panel-title">Sessions</span>
+                <button class="btn-primary btn-small" id="pb-new-session-btn">+ New</button>
+              </div>
+              <div id="pb-sessions-list" class="pb-sessions-list">
+                <div class="empty">No sessions yet.</div>
+              </div>
+            </div>
+            <div class="pb-items-panel">
+              <div id="pb-placeholder" class="pb-placeholder">
+                <div class="pb-placeholder-icon">📋</div>
+                <div>Select a session to view its items</div>
+              </div>
+              <div id="pb-items-content" class="hidden">
+                <div class="pb-panel-header">
+                  <span class="pb-panel-title" id="pb-selected-session-name">Session</span>
+                  <button class="btn-secondary btn-small" id="pb-add-item-btn">+ Add item</button>
+                </div>
+                <div id="pb-items-list" class="pb-items-list">
+                  <div class="empty">No items yet — add something to practice.</div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -193,27 +249,105 @@
     </div>
   </div>
 
-  <!-- ============ NOTES MODAL (post-session) ============ -->
-  <div id="notes-modal" class="modal hidden" role="dialog" aria-modal="true">
-    <div class="modal-content notes-modal">
+  <!-- ============ ALL SESSIONS MODAL ============ -->
+  <div id="all-sessions-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content all-sessions-modal">
       <div class="modal-header">
-        <h3>Session complete</h3>
+        <h3>All sessions</h3>
+        <button class="modal-close" id="all-sessions-close" aria-label="Close">×</button>
       </div>
       <div class="modal-body">
-        <div id="notes-summary" class="notes-summary"></div>
-        <label for="notes-input">Notes (optional)</label>
-        <textarea id="notes-input" rows="4" placeholder="How did it feel? What still needs work?"></textarea>
+        <div id="all-sessions-list" class="sessions-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ CHORD CATEGORY: ADD CHORDS MODAL ============ -->
+  <div id="chord-cat-picker-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content cat-picker-modal">
+      <div class="modal-header">
+        <h3 id="chord-cat-picker-title">Add chords to category</h3>
+        <button class="modal-close" id="chord-cat-picker-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint">Click chords to toggle them in or out of this category.</p>
+        <div id="chord-cat-picker-grid" class="cat-picker-grid"></div>
         <div class="builder-actions">
-          <button class="btn-secondary" id="notes-skip">Skip</button>
-          <button class="btn-primary" id="notes-save">Save session</button>
+          <button class="btn-primary" id="chord-cat-picker-done">Done</button>
         </div>
       </div>
     </div>
   </div>
 
-  <footer class="site-footer">
-    Course content inspired by <a href="https://www.justinguitar.com" target="_blank" rel="noopener noreferrer">JustinGuitar</a>
-  </footer>
+  <!-- ============ PROGRESSION CATEGORY: ADD PROGRESSIONS MODAL ============ -->
+  <div id="prog-cat-picker-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content cat-picker-modal">
+      <div class="modal-header">
+        <h3 id="prog-cat-picker-title">Add progressions to category</h3>
+        <button class="modal-close" id="prog-cat-picker-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint">Click progressions to toggle them in or out of this category.</p>
+        <div id="prog-cat-picker-list" class="cat-picker-list"></div>
+        <div class="builder-actions">
+          <button class="btn-primary" id="prog-cat-picker-done">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PRACTICE SESSION BUILDER: ADD ITEM MODAL ============ -->
+  <div id="pb-add-item-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content pb-item-modal">
+      <div class="modal-header">
+        <h3>Add practice item</h3>
+        <button class="modal-close" id="pb-item-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="pb-item-form">
+          <div class="control">
+            <label for="pb-item-type">Type</label>
+            <select id="pb-item-type">
+              <option value="chord">Chord</option>
+              <option value="progression">Progression</option>
+            </select>
+          </div>
+          <div class="control">
+            <label for="pb-item-target">Target</label>
+            <select id="pb-item-target"></select>
+          </div>
+          <div class="control">
+            <label for="pb-item-duration">Duration (minutes)</label>
+            <input type="number" id="pb-item-duration" min="1" max="60" value="2" />
+          </div>
+          <div class="control">
+            <label for="pb-item-bpm">BPM</label>
+            <input type="number" id="pb-item-bpm" min="40" max="240" value="80" />
+          </div>
+          <div class="control">
+            <label for="pb-item-ts">Time signature</label>
+            <select id="pb-item-ts">
+              <option value="4/4">4/4</option>
+              <option value="3/4">3/4</option>
+              <option value="6/8">6/8</option>
+            </select>
+          </div>
+          <div class="control" id="pb-item-bpc-wrap">
+            <label for="pb-item-bpc">Bars / chord</label>
+            <select id="pb-item-bpc">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="4">4</option>
+            </select>
+          </div>
+        </div>
+        <div class="builder-actions">
+          <button class="btn-secondary" id="pb-item-cancel">Cancel</button>
+          <button class="btn-primary" id="pb-item-save">Add item</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="{{ url_for('static', filename='js/chord-diagram.js') }}"></script>
   <script src="{{ url_for('static', filename='js/chord-builder.js') }}"></script>
@@ -221,6 +355,7 @@
   <script src="{{ url_for('static', filename='js/chord-audio.js') }}"></script>
   <script src="{{ url_for('static', filename='js/metronome.js') }}"></script>
   <script src="{{ url_for('static', filename='js/history.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/practice-session-builder.js') }}"></script>
   <script src="{{ url_for('static', filename='js/practice.js') }}"></script>
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>

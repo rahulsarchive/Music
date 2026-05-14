@@ -9,17 +9,19 @@
     constructor() {
       this.chords = [];
       this.progressions = [];
-      this.routines = [];
-      this.selection = null; // { type: 'chord'|'progression', id, chord, progression }
+      this.chordCategories = [];
+      this.progCategories = [];
+      this.selection = null;
       this.metronome = null;
       this.chordAudio = null;
-      this.session = null; // { startedAtMs, startedAtIso }
+      this.session = null;
       this.timerId = null;
-      this.currentChordIndex = 0; // for progressions
-      this.beatsPerChord = 4;     // computed from time sig × bars-per-chord
+      this.currentChordIndex = 0;
+      this.beatsPerChord = 4;
       this.beatsPerBar = 4;
       this.audioMode = this._loadAudioMode();
-      this.activeRoutineExerciseId = null;
+      this.activeChordCategoryId = "all";
+      this.activeProgCategoryId = "all";
 
       this._cacheEls();
       this._wireControls();
@@ -36,10 +38,11 @@
     }
 
     _cacheEls() {
+      this.elChordTabContent = document.getElementById("chord-tab-content");
+      this.elProgTabContent = document.getElementById("progression-tab-content");
+      this.elPracticeBuilderTab = document.getElementById("practice-builder-tab");
       this.elChordGrid = document.getElementById("chord-grid");
       this.elProgGrid = document.getElementById("progression-grid");
-      this.elRoutinesTab = document.getElementById("routines-tab");
-      this.elRoutinesContent = document.getElementById("routines-content");
       this.elTabs = document.querySelectorAll(".picker > .tabs .tab");
       this.elBpm = document.getElementById("bpm");
       this.elBpmSlider = document.getElementById("bpm-slider");
@@ -54,12 +57,23 @@
       this.elNextWrap = document.getElementById("next-wrap");
       this.elNextName = document.getElementById("next-chord-name");
       this.elNextSvg = document.getElementById("next-chord-svg");
-      this.elNotesModal = document.getElementById("notes-modal");
-      this.elNotesInput = document.getElementById("notes-input");
-      this.elNotesSummary = document.getElementById("notes-summary");
-      this.elNotesSkip = document.getElementById("notes-skip");
-      this.elNotesSave = document.getElementById("notes-save");
       this.elAudioModeBtns = document.querySelectorAll(".audio-mode-btn");
+
+      // Chord category controls
+      this.elChordCatBar = document.getElementById("chord-category-bar");
+      this.elChordCatActions = document.getElementById("chord-cat-actions");
+      this.elChordCatActionsLabel = document.getElementById("chord-cat-actions-label");
+      this.elChordCatAddBtn = document.getElementById("chord-cat-add-btn");
+      this.elChordCatAddChordsBtn = document.getElementById("chord-cat-add-chords-btn");
+      this.elChordCatDeleteBtn = document.getElementById("chord-cat-delete-btn");
+
+      // Progression category controls
+      this.elProgCatBar = document.getElementById("prog-category-bar");
+      this.elProgCatActions = document.getElementById("prog-cat-actions");
+      this.elProgCatActionsLabel = document.getElementById("prog-cat-actions-label");
+      this.elProgCatAddBtn = document.getElementById("prog-cat-add-btn");
+      this.elProgCatAddProgsBtn = document.getElementById("prog-cat-add-progs-btn");
+      this.elProgCatDeleteBtn = document.getElementById("prog-cat-delete-btn");
     }
 
     _wireControls() {
@@ -80,15 +94,34 @@
       this.elTimeSig.addEventListener("change", () => this._configureMetronome());
       this.elBpc.addEventListener("change", () => this._configureMetronome());
       this.elPlayBtn.addEventListener("click", () => this._togglePlay());
-
-      this.elNotesSkip.addEventListener("click", () => this._saveSession(""));
-      this.elNotesSave.addEventListener("click", () => this._saveSession(this.elNotesInput.value));
-      this.elNotesModal.addEventListener("click", (e) => {
-        if (e.target === this.elNotesModal) this._saveSession("");
-      });
-
       this.elAudioModeBtns.forEach((btn) => {
         btn.addEventListener("click", () => this._setAudioMode(btn.dataset.mode));
+      });
+
+      // Chord categories
+      this.elChordCatAddBtn.addEventListener("click", () => this._promptNewChordCategory());
+      this.elChordCatAddChordsBtn.addEventListener("click", () => this._openChordCatPicker());
+      this.elChordCatDeleteBtn.addEventListener("click", () => this._deleteCurrentChordCategory());
+
+      // Progression categories
+      this.elProgCatAddBtn.addEventListener("click", () => this._promptNewProgCategory());
+      this.elProgCatAddProgsBtn.addEventListener("click", () => this._openProgCatPicker());
+      this.elProgCatDeleteBtn.addEventListener("click", () => this._deleteCurrentProgCategory());
+
+      // Chord category picker modal
+      document.getElementById("chord-cat-picker-close").addEventListener("click", () => {
+        document.getElementById("chord-cat-picker-modal").classList.add("hidden");
+      });
+      document.getElementById("chord-cat-picker-done").addEventListener("click", () => {
+        document.getElementById("chord-cat-picker-modal").classList.add("hidden");
+      });
+
+      // Progression category picker modal
+      document.getElementById("prog-cat-picker-close").addEventListener("click", () => {
+        document.getElementById("prog-cat-picker-modal").classList.add("hidden");
+      });
+      document.getElementById("prog-cat-picker-done").addEventListener("click", () => {
+        document.getElementById("prog-cat-picker-modal").classList.add("hidden");
       });
     }
 
@@ -96,10 +129,10 @@
       this.elTabs.forEach((t) => {
         t.classList.toggle("active", t.dataset.tab === name);
       });
-      this.elChordGrid.classList.toggle("hidden", name !== "chord");
-      this.elProgGrid.classList.toggle("hidden", name !== "progression");
-      this.elRoutinesTab.classList.toggle("hidden", name !== "routines");
-      // Bars/chord only relevant for progression-shaped selections.
+      this.elChordTabContent.classList.toggle("hidden", name !== "chord");
+      this.elProgTabContent.classList.toggle("hidden", name !== "progression");
+      this.elPracticeBuilderTab.classList.toggle("hidden", name !== "practice-builder");
+
       const showBpc = name === "progression"
         || (this.selection && this.selection.type === "progression");
       this.elBpcWrap.classList.toggle("hidden", !showBpc);
@@ -109,51 +142,276 @@
     setChordAudio(ca) { this.chordAudio = ca; }
 
     async loadData() {
-      const [chords, progs, routines] = await Promise.all([
+      const [chords, progs, chordCats, progCats] = await Promise.all([
         fetch("/api/chords").then((r) => r.json()),
         fetch("/api/progressions").then((r) => r.json()),
-        fetch("/api/routines").then((r) => r.json()),
+        fetch("/api/chord-categories").then((r) => r.json()),
+        fetch("/api/progression-categories").then((r) => r.json()),
       ]);
       this.chords = chords;
       this.progressions = progs;
-      this.routines = routines;
+      this.chordCategories = chordCats;
+      this.progCategories = progCats;
+      this._renderChordCategoryBar();
       this._renderChordGrid();
+      this._renderProgCategoryBar();
       this._renderProgressionGrid();
-      this._renderRoutines();
     }
+
+    // ---------- Chord Category Bar ----------
+
+    _renderChordCategoryBar() {
+      const bar = this.elChordCatBar;
+      // Remove existing category pills (keep the "All" pill and the add button)
+      bar.querySelectorAll(".cat-pill:not([data-cat-id='all'])").forEach((el) => el.remove());
+
+      // Re-insert category pills before the add button
+      for (const cat of this.chordCategories) {
+        const pill = document.createElement("button");
+        pill.className = "cat-pill" + (String(this.activeChordCategoryId) === String(cat.id) ? " active" : "");
+        pill.dataset.catId = String(cat.id);
+        pill.textContent = cat.name;
+        pill.addEventListener("click", () => this._selectChordCategory(cat.id));
+        this.elChordCatAddBtn.before(pill);
+      }
+
+      // Ensure "All" pill is wired
+      const allPill = bar.querySelector(".cat-pill[data-cat-id='all']");
+      allPill.className = "cat-pill" + (this.activeChordCategoryId === "all" ? " active" : "");
+      allPill.onclick = () => this._selectChordCategory("all");
+    }
+
+    _selectChordCategory(catId) {
+      this.activeChordCategoryId = catId;
+      this.elChordCatBar.querySelectorAll(".cat-pill").forEach((p) => {
+        p.classList.toggle("active", String(p.dataset.catId) === String(catId));
+      });
+      if (catId === "all") {
+        this.elChordCatActions.classList.add("hidden");
+      } else {
+        const cat = this.chordCategories.find((c) => String(c.id) === String(catId));
+        if (cat) {
+          this.elChordCatActionsLabel.textContent = cat.name;
+          this.elChordCatActions.classList.remove("hidden");
+        }
+      }
+      this._renderChordGrid();
+    }
+
+    async _promptNewChordCategory() {
+      const name = prompt("New category name:");
+      if (!name || !name.trim()) return;
+      const res = await fetch("/api/chord-categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      if (res.ok) {
+        await this.loadData();
+        const cat = this.chordCategories.find((c) => c.name === name.trim());
+        if (cat) this._selectChordCategory(cat.id);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert("Failed: " + (err.error || res.status));
+      }
+    }
+
+    async _deleteCurrentChordCategory() {
+      const cat = this.chordCategories.find((c) => String(c.id) === String(this.activeChordCategoryId));
+      if (!cat) return;
+      if (!confirm(`Delete category "${cat.name}"? The chords in it will not be deleted.`)) return;
+      const res = await fetch(`/api/chord-categories/${cat.id}`, { method: "DELETE" });
+      if (res.ok) {
+        this.activeChordCategoryId = "all";
+        await this.loadData();
+      } else {
+        alert("Delete failed");
+      }
+    }
+
+    _openChordCatPicker() {
+      const cat = this.chordCategories.find((c) => String(c.id) === String(this.activeChordCategoryId));
+      if (!cat) return;
+      const modal = document.getElementById("chord-cat-picker-modal");
+      document.getElementById("chord-cat-picker-title").textContent = `Add chords to "${cat.name}"`;
+      const grid = document.getElementById("chord-cat-picker-grid");
+      grid.innerHTML = "";
+      for (const chord of this.chords) {
+        const inCat = cat.chord_ids.includes(chord.id);
+        const chip = document.createElement("button");
+        chip.className = "cat-picker-chip" + (inCat ? " selected" : "");
+        chip.textContent = chord.display_name;
+        chip.addEventListener("click", async () => {
+          const isIn = cat.chord_ids.includes(chord.id);
+          if (isIn) {
+            await fetch(`/api/chord-categories/${cat.id}/chords/${chord.id}`, { method: "DELETE" });
+            cat.chord_ids = cat.chord_ids.filter((id) => id !== chord.id);
+            chip.classList.remove("selected");
+          } else {
+            await fetch(`/api/chord-categories/${cat.id}/chords`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ chord_id: chord.id }),
+            });
+            cat.chord_ids.push(chord.id);
+            chip.classList.add("selected");
+          }
+          this._renderChordGrid();
+        });
+        grid.appendChild(chip);
+      }
+      modal.classList.remove("hidden");
+    }
+
+    // ---------- Progression Category Bar ----------
+
+    _renderProgCategoryBar() {
+      const bar = this.elProgCatBar;
+      bar.querySelectorAll(".cat-pill:not([data-cat-id='all'])").forEach((el) => el.remove());
+
+      for (const cat of this.progCategories) {
+        const pill = document.createElement("button");
+        pill.className = "cat-pill" + (String(this.activeProgCategoryId) === String(cat.id) ? " active" : "");
+        pill.dataset.catId = String(cat.id);
+        pill.textContent = cat.name;
+        pill.addEventListener("click", () => this._selectProgCategory(cat.id));
+        this.elProgCatAddBtn.before(pill);
+      }
+
+      const allPill = bar.querySelector(".cat-pill[data-cat-id='all']");
+      allPill.className = "cat-pill" + (this.activeProgCategoryId === "all" ? " active" : "");
+      allPill.onclick = () => this._selectProgCategory("all");
+    }
+
+    _selectProgCategory(catId) {
+      this.activeProgCategoryId = catId;
+      this.elProgCatBar.querySelectorAll(".cat-pill").forEach((p) => {
+        p.classList.toggle("active", String(p.dataset.catId) === String(catId));
+      });
+      if (catId === "all") {
+        this.elProgCatActions.classList.add("hidden");
+      } else {
+        const cat = this.progCategories.find((c) => String(c.id) === String(catId));
+        if (cat) {
+          this.elProgCatActionsLabel.textContent = cat.name;
+          this.elProgCatActions.classList.remove("hidden");
+        }
+      }
+      this._renderProgressionGrid();
+    }
+
+    async _promptNewProgCategory() {
+      const name = prompt("New category name:");
+      if (!name || !name.trim()) return;
+      const res = await fetch("/api/progression-categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      if (res.ok) {
+        await this.loadData();
+        const cat = this.progCategories.find((c) => c.name === name.trim());
+        if (cat) this._selectProgCategory(cat.id);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert("Failed: " + (err.error || res.status));
+      }
+    }
+
+    async _deleteCurrentProgCategory() {
+      const cat = this.progCategories.find((c) => String(c.id) === String(this.activeProgCategoryId));
+      if (!cat) return;
+      if (!confirm(`Delete category "${cat.name}"? The progressions in it will not be deleted.`)) return;
+      const res = await fetch(`/api/progression-categories/${cat.id}`, { method: "DELETE" });
+      if (res.ok) {
+        this.activeProgCategoryId = "all";
+        await this.loadData();
+      } else {
+        alert("Delete failed");
+      }
+    }
+
+    _openProgCatPicker() {
+      const cat = this.progCategories.find((c) => String(c.id) === String(this.activeProgCategoryId));
+      if (!cat) return;
+      const modal = document.getElementById("prog-cat-picker-modal");
+      document.getElementById("prog-cat-picker-title").textContent = `Add progressions to "${cat.name}"`;
+      const list = document.getElementById("prog-cat-picker-list");
+      list.innerHTML = "";
+      for (const prog of this.progressions) {
+        const inCat = cat.progression_ids.includes(prog.id);
+        const chip = document.createElement("button");
+        chip.className = "cat-picker-chip" + (inCat ? " selected" : "");
+        chip.textContent = prog.name;
+        chip.addEventListener("click", async () => {
+          const isIn = cat.progression_ids.includes(prog.id);
+          if (isIn) {
+            await fetch(`/api/progression-categories/${cat.id}/progressions/${prog.id}`, { method: "DELETE" });
+            cat.progression_ids = cat.progression_ids.filter((id) => id !== prog.id);
+            chip.classList.remove("selected");
+          } else {
+            await fetch(`/api/progression-categories/${cat.id}/progressions`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ progression_id: prog.id }),
+            });
+            cat.progression_ids.push(prog.id);
+            chip.classList.add("selected");
+          }
+          this._renderProgressionGrid();
+        });
+        list.appendChild(chip);
+      }
+      modal.classList.remove("hidden");
+    }
+
+    // ---------- Chord Grid ----------
 
     _renderChordGrid() {
       const grid = this.elChordGrid;
       grid.innerHTML = "";
-      for (const c of this.chords) {
+
+      let visibleChords = this.chords;
+      if (this.activeChordCategoryId !== "all") {
+        const cat = this.chordCategories.find((c) => String(c.id) === String(this.activeChordCategoryId));
+        if (cat) visibleChords = this.chords.filter((c) => cat.chord_ids.includes(c.id));
+      }
+
+      for (const c of visibleChords) {
         const card = document.createElement("div");
         card.className = "chord-card";
         card.dataset.chordId = String(c.id);
-        card.innerHTML = `<div class="name"></div><svg class="mini" viewBox="0 0 140 170"></svg>`;
+
+        const statsHtml = this._buildChordStatsHtml(c);
+        card.innerHTML = `
+          <div class="name"></div>
+          <svg class="mini" viewBox="0 0 140 170"></svg>
+          ${statsHtml}
+        `;
         card.querySelector(".name").textContent = c.display_name;
         const svg = card.querySelector("svg");
         window.ChordDiagram.renderChord(svg, c.frets, c.fingers, { showFingers: false });
         card.addEventListener("click", () => this._selectChord(c, card));
-        if (c.is_custom) {
-          const del = document.createElement("button");
-          del.className = "delete-btn";
-          del.textContent = "×";
-          del.title = "Delete custom chord";
-          del.addEventListener("click", async (e) => {
-            e.stopPropagation();
-            if (!confirm(`Delete custom chord "${c.display_name}"?`)) return;
-            const res = await fetch(`/api/chords/${c.id}`, { method: "DELETE" });
-            if (res.ok) {
-              await this.loadData();
-            } else {
-              const err = await res.json().catch(() => ({}));
-              alert("Delete failed: " + (err.error || res.status));
-            }
-          });
-          card.appendChild(del);
-        }
+
+        const del = document.createElement("button");
+        del.className = "delete-btn";
+        del.textContent = "×";
+        del.title = "Delete chord";
+        del.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          if (!confirm(`Delete chord "${c.display_name}"?`)) return;
+          const res = await fetch(`/api/chords/${c.id}`, { method: "DELETE" });
+          if (res.ok) {
+            await this.loadData();
+          } else {
+            const err = await res.json().catch(() => ({}));
+            alert("Delete failed: " + (err.error || res.status));
+          }
+        });
+        card.appendChild(del);
         grid.appendChild(card);
       }
+
       const add = document.createElement("div");
       add.className = "add-card";
       add.innerHTML = `<div class="plus">+</div><div>Add custom</div>`;
@@ -161,10 +419,34 @@
       grid.appendChild(add);
     }
 
+    _buildChordStatsHtml(c) {
+      const secs = c.total_practice_seconds || 0;
+      if (secs === 0 && !c.last_bpm) return "";
+      const mins = Math.floor(secs / 60);
+      const timeStr = mins >= 60
+        ? `${Math.floor(mins / 60)}h ${mins % 60}m`
+        : mins >= 1 ? `${mins}m` : `${secs}s`;
+      const bpmStr = c.last_bpm ? `${c.last_bpm} bpm` : "";
+      const parts = [];
+      if (secs > 0) parts.push(timeStr);
+      if (bpmStr) parts.push(bpmStr);
+      if (!parts.length) return "";
+      return `<div class="chord-stats">${parts.join(" · ")}</div>`;
+    }
+
+    // ---------- Progression Grid ----------
+
     _renderProgressionGrid() {
       const grid = this.elProgGrid;
       grid.innerHTML = "";
-      for (const p of this.progressions) {
+
+      let visibleProgs = this.progressions;
+      if (this.activeProgCategoryId !== "all") {
+        const cat = this.progCategories.find((c) => String(c.id) === String(this.activeProgCategoryId));
+        if (cat) visibleProgs = this.progressions.filter((p) => cat.progression_ids.includes(p.id));
+      }
+
+      for (const p of visibleProgs) {
         const card = document.createElement("div");
         card.className = "prog-card";
         card.dataset.progId = String(p.id);
@@ -173,276 +455,31 @@
         card.querySelector(".name").textContent = p.name;
         card.querySelector(".prog-meta").textContent = `${p.time_signature} · ${p.bars_per_chord} bar${p.bars_per_chord === 1 ? "" : "s"}/chord`;
         card.addEventListener("click", () => this._selectProgression(p, card));
-        if (p.is_custom) {
-          const del = document.createElement("button");
-          del.className = "delete-btn";
-          del.textContent = "×";
-          del.title = "Delete progression";
-          del.addEventListener("click", async (e) => {
-            e.stopPropagation();
-            if (!confirm(`Delete progression "${p.name}"?`)) return;
-            const res = await fetch(`/api/progressions/${p.id}`, { method: "DELETE" });
-            if (res.ok) {
-              await this.loadData();
-            } else {
-              const err = await res.json().catch(() => ({}));
-              alert("Delete failed: " + (err.error || res.status));
-            }
-          });
-          card.appendChild(del);
-        }
+
+        const del = document.createElement("button");
+        del.className = "delete-btn";
+        del.textContent = "×";
+        del.title = "Delete progression";
+        del.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          if (!confirm(`Delete progression "${p.name}"?`)) return;
+          const res = await fetch(`/api/progressions/${p.id}`, { method: "DELETE" });
+          if (res.ok) {
+            await this.loadData();
+          } else {
+            const err = await res.json().catch(() => ({}));
+            alert("Delete failed: " + (err.error || res.status));
+          }
+        });
+        card.appendChild(del);
         grid.appendChild(card);
       }
+
       const add = document.createElement("div");
       add.className = "add-card";
       add.innerHTML = `<div class="plus">+</div><div>Build progression</div>`;
       add.addEventListener("click", () => window.__openProgressionBuilder());
       grid.appendChild(add);
-    }
-
-    _renderRoutines() {
-      const wrap = this.elRoutinesContent;
-      wrap.innerHTML = "";
-
-      // Grade selector
-      const grades = [1, 2];
-      const gradeBar = document.createElement("div");
-      gradeBar.className = "grade-tabs";
-      grades.forEach((g, idx) => {
-        const btn = document.createElement("button");
-        btn.className = "grade-tab" + (idx === 0 ? " active" : "");
-        btn.textContent = `Grade ${g}`;
-        btn.dataset.grade = String(g);
-        btn.addEventListener("click", () => {
-          gradeBar.querySelectorAll(".grade-tab").forEach((b) => b.classList.toggle("active", b === btn));
-          wrap.querySelectorAll(".routine-grade").forEach((sec) => {
-            sec.classList.toggle("hidden", sec.dataset.grade !== String(g));
-          });
-        });
-        gradeBar.appendChild(btn);
-      });
-      wrap.appendChild(gradeBar);
-
-      const intro = document.createElement("p");
-      intro.className = "routines-intro";
-      intro.textContent = "Curriculum inspired by Justin Guitar's free beginner course. Click Start on any exercise to load it into the practice area.";
-      wrap.appendChild(intro);
-
-      for (const g of grades) {
-        const section = document.createElement("div");
-        section.className = "routine-grade";
-        section.dataset.grade = String(g);
-        if (g !== grades[0]) section.classList.add("hidden");
-
-        const modules = this.routines.filter((m) => m.grade === g);
-        const totalEx = modules.reduce((s, m) => s + m.exercises.length, 0);
-        const doneEx = modules.reduce(
-          (s, m) => s + m.exercises.filter((e) => e.completed_at).length,
-          0
-        );
-
-        const pct = totalEx > 0 ? Math.round((doneEx / totalEx) * 100) : 0;
-        const overview = document.createElement("div");
-        overview.className = "grade-overview";
-        overview.innerHTML = `
-          <strong>Grade ${g}</strong> · <span class="grade-progress">${doneEx} / ${totalEx} exercises complete</span>
-          <div class="grade-prog-bar"><div class="grade-prog-bar-fill" style="width:${pct}%"></div></div>
-        `;
-        section.appendChild(overview);
-
-        for (const m of modules) {
-          section.appendChild(this._renderModule(m));
-        }
-        wrap.appendChild(section);
-      }
-    }
-
-    _renderModule(m) {
-      const mod = document.createElement("div");
-      mod.className = "routine-module";
-
-      const done = m.exercises.filter((e) => e.completed_at).length;
-      const total = m.exercises.length;
-
-      const isComplete = done === total && total > 0;
-
-      const header = document.createElement("button");
-      header.className = "module-header";
-      header.innerHTML = `
-        <span class="caret">▶</span>
-        <span class="module-title"></span>
-        <span class="module-progress ${isComplete ? "complete" : ""}">${done}/${total}${isComplete ? " ✓" : ""}</span>
-      `;
-      header.querySelector(".module-title").textContent = m.title;
-
-      const body = document.createElement("div");
-      // Start hidden via CSS max-height trick; we use .hidden for closed state.
-      body.className = "module-body hidden";
-
-      if (m.description) {
-        const desc = document.createElement("p");
-        desc.className = "module-desc";
-        desc.textContent = m.description;
-        body.appendChild(desc);
-      }
-
-      for (const ex of m.exercises) {
-        body.appendChild(this._renderExercise(ex));
-      }
-
-      header.addEventListener("click", () => {
-        const isOpen = header.classList.contains("open");
-        header.classList.toggle("open", !isOpen);
-        body.classList.toggle("hidden", isOpen);
-      });
-
-      mod.appendChild(header);
-      mod.appendChild(body);
-      return mod;
-    }
-
-    _renderExercise(ex) {
-      const card = document.createElement("div");
-      card.className = "exercise-card";
-      card.dataset.exId = String(ex.id);
-      if (ex.completed_at) card.classList.add("done");
-
-      const left = document.createElement("div");
-      left.className = "ex-left";
-
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.className = "ex-check";
-      checkbox.checked = !!ex.completed_at;
-      checkbox.addEventListener("change", async () => {
-        await this._toggleExerciseComplete(ex, checkbox.checked, card);
-      });
-      left.appendChild(checkbox);
-
-      const text = document.createElement("div");
-      text.className = "ex-text";
-
-      const title = document.createElement("div");
-      title.className = "ex-title";
-      title.textContent = ex.title;
-      text.appendChild(title);
-
-      if (ex.instructions) {
-        const ins = document.createElement("div");
-        ins.className = "ex-instructions";
-        ins.textContent = ex.instructions;
-        text.appendChild(ins);
-      }
-
-      const meta = document.createElement("div");
-      meta.className = "ex-meta";
-      const parts = [];
-      if (ex.target_name) parts.push(`<span class="pchip">${escapeHtml(ex.target_name)}</span>`);
-      if (ex.target_type) {
-        const mins = Math.round(ex.default_duration_seconds / 60);
-        const minLabel = mins >= 1 ? `${mins} min` : `${ex.default_duration_seconds}s`;
-        parts.push(`${ex.default_bpm} bpm`);
-        parts.push(minLabel);
-        parts.push(ex.default_time_signature);
-        if (ex.target_type === "progression") {
-          parts.push(`${ex.default_bars_per_chord} bar${ex.default_bars_per_chord === 1 ? "" : "s"}/chord`);
-        }
-      } else {
-        parts.push("<em>Reference</em>");
-      }
-      meta.innerHTML = parts.join(" · ");
-      text.appendChild(meta);
-
-      left.appendChild(text);
-      card.appendChild(left);
-
-      if (ex.target_type) {
-        const startBtn = document.createElement("button");
-        startBtn.className = "btn-primary btn-small";
-        startBtn.textContent = "Start";
-        startBtn.addEventListener("click", () => this.startExercise(ex));
-        card.appendChild(startBtn);
-      }
-
-      return card;
-    }
-
-    async _toggleExerciseComplete(ex, completed, card) {
-      try {
-        const res = await fetch(`/api/routines/exercises/${ex.id}/complete`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ completed }),
-        });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const updated = await res.json();
-        ex.completed_at = updated.completed_at;
-        card.classList.toggle("done", !!ex.completed_at);
-        this._updateRoutineCounters();
-      } catch (e) {
-        alert("Failed to update completion: " + e.message);
-      }
-    }
-
-    _updateRoutineCounters() {
-      // Recompute module + grade counters in-place.
-      this.elRoutinesContent.querySelectorAll(".routine-module").forEach((modEl) => {
-        const total = modEl.querySelectorAll(".exercise-card").length;
-        const done = modEl.querySelectorAll(".exercise-card.done").length;
-        const counter = modEl.querySelector(".module-progress");
-        if (counter) {
-          const complete = done === total && total > 0;
-          counter.textContent = `${done}/${total}${complete ? " ✓" : ""}`;
-          counter.classList.toggle("complete", complete);
-        }
-      });
-      this.elRoutinesContent.querySelectorAll(".routine-grade").forEach((gradeEl) => {
-        const total = gradeEl.querySelectorAll(".exercise-card").length;
-        const done = gradeEl.querySelectorAll(".exercise-card.done").length;
-        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-        const counter = gradeEl.querySelector(".grade-progress");
-        if (counter) counter.textContent = `${done} / ${total} exercises complete`;
-        const fill = gradeEl.querySelector(".grade-prog-bar-fill");
-        if (fill) fill.style.width = `${pct}%`;
-      });
-    }
-
-    startExercise(ex) {
-      if (!ex.target_type) return;
-      // Stop any currently running session first.
-      if (this.metronome && this.metronome.isRunning) this._stop();
-
-      this.activeRoutineExerciseId = ex.id;
-
-      // Configure controls
-      this.elBpm.value = ex.default_bpm;
-      this.elBpmSlider.value = ex.default_bpm;
-      this.elTimeSig.value = ex.default_time_signature;
-      this.elBpc.value = String(ex.default_bars_per_chord);
-
-      if (ex.target_type === "chord") {
-        const chord = this.chords.find((c) => c.id === ex.target_id);
-        if (!chord) { alert("Chord not found"); return; }
-        this._switchTab("chord");
-        this._clearSelectionUi();
-        const card = this.elChordGrid.querySelector(`.chord-card[data-chord-id="${chord.id}"]`);
-        if (card) card.classList.add("selected");
-        this.selection = { type: "chord", id: chord.id, chord };
-      } else {
-        const prog = this.progressions.find((p) => p.id === ex.target_id);
-        if (!prog) { alert("Progression not found"); return; }
-        this._switchTab("progression");
-        this._clearSelectionUi();
-        const card = this.elProgGrid.querySelector(`.prog-card[data-prog-id="${prog.id}"]`);
-        if (card) card.classList.add("selected");
-        this.selection = { type: "progression", id: prog.id, progression: prog };
-      }
-
-      this.currentChordIndex = 0;
-      this._renderNowPlaying();
-      this.elPlayBtn.disabled = false;
-      this._configureMetronome();
-      this._start();
     }
 
     _clearSelectionUi() {
@@ -454,7 +491,6 @@
       this._clearSelectionUi();
       card.classList.add("selected");
       this.selection = { type: "chord", id: chord.id, chord };
-      this.activeRoutineExerciseId = null;
       this.currentChordIndex = 0;
       this._renderNowPlaying();
       this.elPlayBtn.disabled = false;
@@ -466,7 +502,6 @@
       this._clearSelectionUi();
       card.classList.add("selected");
       this.selection = { type: "progression", id: prog.id, progression: prog };
-      this.activeRoutineExerciseId = null;
       this.currentChordIndex = 0;
       if (prog.time_signature) this.elTimeSig.value = prog.time_signature;
       if (prog.bars_per_chord) this.elBpc.value = String(prog.bars_per_chord);
@@ -498,10 +533,9 @@
         window.ChordDiagram.renderChord(this.elNextSvg, nextC.frets, nextC.fingers, { showFingers: false });
         this.elNextWrap.classList.remove("hidden");
       }
-      // Flash the chord name on change
       if (flash) {
         this.elCurName.style.animation = "none";
-        void this.elCurName.offsetWidth; // reflow to restart animation
+        void this.elCurName.offsetWidth;
         this.elCurName.style.animation = "chord-flash 0.4s ease";
       }
     }
@@ -548,9 +582,7 @@
       this._renderNowPlaying();
       this._applyMetronomeMuting();
 
-      // Lazily attach a ChordAudio bound to the metronome's AudioContext.
       if (!this.chordAudio && window.ChordAudio && this.metronome) {
-        // Metronome creates its audioCtx on start; ensure it exists.
         if (!this.metronome.audioCtx) {
           this.metronome.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         }
@@ -579,7 +611,7 @@
       this.elPlayBtn.textContent = "Start";
       this.elPlayBtn.classList.remove("playing");
 
-      this._pendingSession = {
+      const payload = {
         started_at: this.session.startedAtIso,
         ended_at: new Date(endedMs).toISOString(),
         duration_seconds: durationSec,
@@ -589,9 +621,10 @@
           ? (parseInt(this.elBpc.value, 10) || 1) : 1,
         target_type: this.selection.type,
         target_id: this.selection.id,
+        notes: null,
       };
       this.session = null;
-      this._showNotesModal(durationSec);
+      this._saveSession(payload);
     }
 
     _tickTimer() {
@@ -605,7 +638,6 @@
     onBeat(beatIdx, audioTime) {
       if (!this.selection) return;
 
-      // Determine which chord applies to this beat (deterministic).
       let chord;
       if (this.selection.type === "chord") {
         chord = this.selection.chord;
@@ -614,81 +646,74 @@
         const idx = Math.floor(beatIdx / this.beatsPerChord) % chords.length;
         if (idx !== this.currentChordIndex) {
           this.currentChordIndex = idx;
-          this._renderNowPlaying(true); // true = flash animation on chord change
+          this._renderNowPlaying(true);
         }
         chord = chords[idx];
       }
 
-      // Strum on the downbeat of each bar — the chord rings out underneath
-      // the metronome ticks like an acoustic player letting the strings sing.
       if (this.chordAudio && this.audioMode !== "tick"
           && beatIdx % this.beatsPerBar === 0) {
         this.chordAudio.play(audioTime, chord.frets);
       }
     }
 
-    _showNotesModal(durationSec) {
-      const targetName = this.selection.type === "chord"
-        ? this.selection.chord.display_name
-        : this.selection.progression.name;
-      const m = Math.floor(durationSec / 60);
-      const s = durationSec % 60;
-      this.elNotesSummary.innerHTML =
-        `<strong>${escapeHtml(targetName)}</strong> · ${m}m ${s}s · ${this._pendingSession.bpm} bpm · ${this._pendingSession.time_signature}`;
-      this.elNotesInput.value = "";
-      this.elNotesModal.classList.remove("hidden");
-      this.elNotesInput.focus();
-    }
-
-    async _saveSession(notes) {
-      if (!this._pendingSession) return;
-      const payload = { ...this._pendingSession, notes: (notes || "").trim() || null };
-      const completedExerciseId = this.activeRoutineExerciseId;
-      this._pendingSession = null;
-      this.elNotesModal.classList.add("hidden");
+    async _saveSession(payload) {
       try {
-        const res = await fetch("/api/sessions", {
+        await fetch("/api/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          alert("Failed to save session: " + (err.error || res.status));
-        } else if (completedExerciseId) {
-          // Auto-mark the routine exercise complete after a saved session.
-          this._autoCompleteRoutineExercise(completedExerciseId);
-          this.activeRoutineExerciseId = null;
-        }
-      } catch (e) {
-        alert("Failed to save session: " + e.message);
-      }
+      } catch (_) {}
       this.elTimer.textContent = "00:00";
+      // Reload chord stats
+      await this.loadData();
       await window.History.refresh();
     }
 
-    async _autoCompleteRoutineExercise(exId) {
-      try {
-        const res = await fetch(`/api/routines/exercises/${exId}/complete`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ completed: true }),
-        });
-        if (!res.ok) return;
-        const updated = await res.json();
-        for (const m of this.routines) {
-          for (const ex of m.exercises) {
-            if (ex.id === exId) ex.completed_at = updated.completed_at;
-          }
-        }
-        const card = this.elRoutinesContent.querySelector(`.exercise-card[data-ex-id="${exId}"]`);
-        if (card) {
-          card.classList.add("done");
-          const cb = card.querySelector(".ex-check");
-          if (cb) cb.checked = true;
-        }
-        this._updateRoutineCounters();
-      } catch (_) {}
+    // Called by practice-session-builder when starting an item
+    startBuilderItem(item) {
+      if (this.metronome && this.metronome.isRunning) this._stop();
+
+      this.elBpm.value = item.bpm;
+      this.elBpmSlider.value = item.bpm;
+      this.elTimeSig.value = item.time_signature;
+      this.elBpc.value = String(item.bars_per_chord);
+
+      if (item.target_type === "chord") {
+        const chord = this.chords.find((c) => c.id === item.target_id);
+        if (!chord) { alert("Chord not found"); return; }
+        // Reset category to "all" so the chord is visible
+        this.activeChordCategoryId = "all";
+        this._switchTab("chord");
+        this._clearSelectionUi();
+        this._renderChordCategoryBar();
+        this.elChordCatActions.classList.add("hidden");
+        this._renderChordGrid();
+        const card = this.elChordGrid.querySelector(`.chord-card[data-chord-id="${chord.id}"]`);
+        if (card) card.classList.add("selected");
+        this.selection = { type: "chord", id: chord.id, chord };
+        this.elBpcWrap.classList.add("hidden");
+      } else {
+        const prog = this.progressions.find((p) => p.id === item.target_id);
+        if (!prog) { alert("Progression not found"); return; }
+        this.activeProgCategoryId = "all";
+        this._switchTab("progression");
+        this._clearSelectionUi();
+        this._renderProgCategoryBar();
+        this.elProgCatActions.classList.add("hidden");
+        this._renderProgressionGrid();
+        const card = this.elProgGrid.querySelector(`.prog-card[data-prog-id="${prog.id}"]`);
+        if (card) card.classList.add("selected");
+        this.selection = { type: "progression", id: prog.id, progression: prog };
+        this.elBpcWrap.classList.remove("hidden");
+      }
+
+      this.currentChordIndex = 0;
+      this._renderNowPlaying();
+      this.elPlayBtn.disabled = false;
+      this._configureMetronome();
+      this._start();
     }
   }
 

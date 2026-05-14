@@ -114,13 +114,60 @@ def init_db() -> None:
             );
 
             CREATE INDEX IF NOT EXISTS idx_re_module ON routine_exercise(module_id);
+
+            CREATE TABLE IF NOT EXISTS chord_category (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE
+            );
+
+            CREATE TABLE IF NOT EXISTS chord_category_member (
+                category_id INTEGER NOT NULL,
+                chord_id INTEGER NOT NULL,
+                PRIMARY KEY (category_id, chord_id),
+                FOREIGN KEY (category_id) REFERENCES chord_category(id) ON DELETE CASCADE,
+                FOREIGN KEY (chord_id) REFERENCES chord(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS progression_category (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE
+            );
+
+            CREATE TABLE IF NOT EXISTS progression_category_member (
+                category_id INTEGER NOT NULL,
+                progression_id INTEGER NOT NULL,
+                PRIMARY KEY (category_id, progression_id),
+                FOREIGN KEY (category_id) REFERENCES progression_category(id) ON DELETE CASCADE,
+                FOREIGN KEY (progression_id) REFERENCES progression(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS practice_session (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS practice_session_item (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                position INTEGER NOT NULL,
+                target_type TEXT NOT NULL,
+                target_id INTEGER NOT NULL,
+                duration_seconds INTEGER NOT NULL DEFAULT 120,
+                bpm INTEGER NOT NULL DEFAULT 80,
+                time_signature TEXT NOT NULL DEFAULT '4/4',
+                bars_per_chord INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY (session_id) REFERENCES practice_session(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_psi_session ON practice_session_item(session_id);
             """
         )
         conn.commit()
 
 
 def _row_to_chord(row: sqlite3.Row) -> dict:
-    return {
+    d = {
         "id": row["id"],
         "name": row["name"],
         "display_name": row["display_name"],
@@ -128,6 +175,12 @@ def _row_to_chord(row: sqlite3.Row) -> dict:
         "fingers": json.loads(row["fingers"]),
         "is_custom": bool(row["is_custom"]),
     }
+    keys = list(row.keys())
+    if "total_practice_seconds" in keys:
+        d["total_practice_seconds"] = row["total_practice_seconds"] or 0
+    if "last_bpm" in keys:
+        d["last_bpm"] = row["last_bpm"]
+    return d
 
 
 # ---------- Routes ----------
@@ -141,7 +194,17 @@ def index():
 def list_chords():
     db = get_db()
     rows = db.execute(
-        "SELECT * FROM chord ORDER BY is_custom, display_name COLLATE NOCASE"
+        """
+        SELECT c.*,
+               COALESCE(SUM(s.duration_seconds), 0) AS total_practice_seconds,
+               (SELECT s2.bpm FROM session s2
+                WHERE s2.target_type='chord' AND s2.target_id=c.id
+                ORDER BY s2.started_at DESC LIMIT 1) AS last_bpm
+        FROM chord c
+        LEFT JOIN session s ON s.target_type='chord' AND s.target_id=c.id
+        GROUP BY c.id
+        ORDER BY c.is_custom, c.display_name COLLATE NOCASE
+        """
     ).fetchall()
     return jsonify([_row_to_chord(r) for r in rows])
 
@@ -164,7 +227,6 @@ def create_chord():
         return jsonify({"error": "fingers must be 6-element list"}), 400
 
     db = get_db()
-    # Build a unique internal name even if display_name collides.
     base = f"{display_name}_custom"
     suffix = 1
     name = f"{base}_{suffix}"
@@ -177,24 +239,27 @@ def create_chord():
         (name, display_name, json.dumps(frets), json.dumps(fingers)),
     )
     db.commit()
-    row = db.execute("SELECT * FROM chord WHERE id=?", (cur.lastrowid,)).fetchone()
+    row = db.execute(
+        """
+        SELECT c.*, 0 AS total_practice_seconds, NULL AS last_bpm
+        FROM chord c WHERE c.id=?
+        """,
+        (cur.lastrowid,)
+    ).fetchone()
     return jsonify(_row_to_chord(row)), 201
 
 
 @app.route("/api/chords/<int:chord_id>", methods=["DELETE"])
 def delete_chord(chord_id: int):
     db = get_db()
-    row = db.execute("SELECT is_custom FROM chord WHERE id=?", (chord_id,)).fetchone()
+    row = db.execute("SELECT 1 FROM chord WHERE id=?", (chord_id,)).fetchone()
     if not row:
         return jsonify({"error": "not found"}), 404
-    if not row["is_custom"]:
-        return jsonify({"error": "cannot delete seed chord"}), 400
-    # Don't delete if referenced by any progression
     ref = db.execute(
         "SELECT 1 FROM progression_chord WHERE chord_id=? LIMIT 1", (chord_id,)
     ).fetchone()
     if ref:
-        return jsonify({"error": "chord is used by a progression"}), 400
+        return jsonify({"error": "chord is used by a progression — remove it from the progression first"}), 400
     db.execute("DELETE FROM chord WHERE id=?", (chord_id,))
     db.commit()
     return ("", 204)
@@ -268,23 +333,321 @@ def create_progression():
 def delete_progression(prog_id: int):
     db = get_db()
     row = db.execute(
-        "SELECT is_custom FROM progression WHERE id=?", (prog_id,)
+        "SELECT 1 FROM progression WHERE id=?", (prog_id,)
     ).fetchone()
     if not row:
         return jsonify({"error": "not found"}), 404
-    if not row["is_custom"]:
-        return jsonify({"error": "cannot delete seed progression"}), 400
     ref = db.execute(
         "SELECT 1 FROM session WHERE target_type='progression' AND target_id=? LIMIT 1",
         (prog_id,),
     ).fetchone()
     if ref:
         return jsonify({"error": "progression has logged sessions"}), 400
-    # progression_chord rows cascade-delete via FK.
     db.execute("DELETE FROM progression WHERE id=?", (prog_id,))
     db.commit()
     return ("", 204)
 
+
+# ---------- Chord Categories ----------
+
+@app.route("/api/chord-categories", methods=["GET"])
+def list_chord_categories():
+    db = get_db()
+    cats = db.execute("SELECT * FROM chord_category ORDER BY name").fetchall()
+    result = []
+    for c in cats:
+        chord_ids = db.execute(
+            "SELECT chord_id FROM chord_category_member WHERE category_id=?",
+            (c["id"],)
+        ).fetchall()
+        result.append({
+            "id": c["id"],
+            "name": c["name"],
+            "chord_ids": [r["chord_id"] for r in chord_ids]
+        })
+    return jsonify(result)
+
+
+@app.route("/api/chord-categories", methods=["POST"])
+def create_chord_category():
+    data = request.get_json(force=True)
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    db = get_db()
+    try:
+        cur = db.execute("INSERT INTO chord_category (name) VALUES (?)", (name,))
+        db.commit()
+        return jsonify({"id": cur.lastrowid, "name": name, "chord_ids": []}), 201
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "category already exists"}), 409
+
+
+@app.route("/api/chord-categories/<int:cat_id>", methods=["DELETE"])
+def delete_chord_category(cat_id: int):
+    db = get_db()
+    row = db.execute("SELECT 1 FROM chord_category WHERE id=?", (cat_id,)).fetchone()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    db.execute("DELETE FROM chord_category WHERE id=?", (cat_id,))
+    db.commit()
+    return ("", 204)
+
+
+@app.route("/api/chord-categories/<int:cat_id>/chords", methods=["POST"])
+def add_chord_to_category(cat_id: int):
+    data = request.get_json(force=True)
+    chord_id = data.get("chord_id")
+    if not chord_id:
+        return jsonify({"error": "chord_id required"}), 400
+    db = get_db()
+    if not db.execute("SELECT 1 FROM chord_category WHERE id=?", (cat_id,)).fetchone():
+        return jsonify({"error": "category not found"}), 404
+    if not db.execute("SELECT 1 FROM chord WHERE id=?", (int(chord_id),)).fetchone():
+        return jsonify({"error": "chord not found"}), 404
+    try:
+        db.execute(
+            "INSERT INTO chord_category_member (category_id, chord_id) VALUES (?, ?)",
+            (cat_id, int(chord_id))
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        pass
+    return ("", 204)
+
+
+@app.route("/api/chord-categories/<int:cat_id>/chords/<int:chord_id>", methods=["DELETE"])
+def remove_chord_from_category(cat_id: int, chord_id: int):
+    db = get_db()
+    db.execute(
+        "DELETE FROM chord_category_member WHERE category_id=? AND chord_id=?",
+        (cat_id, chord_id)
+    )
+    db.commit()
+    return ("", 204)
+
+
+# ---------- Progression Categories ----------
+
+@app.route("/api/progression-categories", methods=["GET"])
+def list_progression_categories():
+    db = get_db()
+    cats = db.execute("SELECT * FROM progression_category ORDER BY name").fetchall()
+    result = []
+    for c in cats:
+        prog_ids = db.execute(
+            "SELECT progression_id FROM progression_category_member WHERE category_id=?",
+            (c["id"],)
+        ).fetchall()
+        result.append({
+            "id": c["id"],
+            "name": c["name"],
+            "progression_ids": [r["progression_id"] for r in prog_ids]
+        })
+    return jsonify(result)
+
+
+@app.route("/api/progression-categories", methods=["POST"])
+def create_progression_category():
+    data = request.get_json(force=True)
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    db = get_db()
+    try:
+        cur = db.execute("INSERT INTO progression_category (name) VALUES (?)", (name,))
+        db.commit()
+        return jsonify({"id": cur.lastrowid, "name": name, "progression_ids": []}), 201
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "category already exists"}), 409
+
+
+@app.route("/api/progression-categories/<int:cat_id>", methods=["DELETE"])
+def delete_progression_category(cat_id: int):
+    db = get_db()
+    row = db.execute("SELECT 1 FROM progression_category WHERE id=?", (cat_id,)).fetchone()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    db.execute("DELETE FROM progression_category WHERE id=?", (cat_id,))
+    db.commit()
+    return ("", 204)
+
+
+@app.route("/api/progression-categories/<int:cat_id>/progressions", methods=["POST"])
+def add_progression_to_category(cat_id: int):
+    data = request.get_json(force=True)
+    prog_id = data.get("progression_id")
+    if not prog_id:
+        return jsonify({"error": "progression_id required"}), 400
+    db = get_db()
+    if not db.execute("SELECT 1 FROM progression_category WHERE id=?", (cat_id,)).fetchone():
+        return jsonify({"error": "category not found"}), 404
+    if not db.execute("SELECT 1 FROM progression WHERE id=?", (int(prog_id),)).fetchone():
+        return jsonify({"error": "progression not found"}), 404
+    try:
+        db.execute(
+            "INSERT INTO progression_category_member (category_id, progression_id) VALUES (?, ?)",
+            (cat_id, int(prog_id))
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        pass
+    return ("", 204)
+
+
+@app.route("/api/progression-categories/<int:cat_id>/progressions/<int:prog_id>", methods=["DELETE"])
+def remove_progression_from_category(cat_id: int, prog_id: int):
+    db = get_db()
+    db.execute(
+        "DELETE FROM progression_category_member WHERE category_id=? AND progression_id=?",
+        (cat_id, prog_id)
+    )
+    db.commit()
+    return ("", 204)
+
+
+# ---------- Practice Sessions ----------
+
+@app.route("/api/practice-sessions", methods=["GET"])
+def list_practice_sessions():
+    db = get_db()
+    sessions = db.execute(
+        "SELECT * FROM practice_session ORDER BY created_at DESC"
+    ).fetchall()
+    result = []
+    for s in sessions:
+        items = db.execute(
+            """
+            SELECT psi.*,
+                   CASE psi.target_type
+                       WHEN 'chord' THEN (SELECT display_name FROM chord WHERE id=psi.target_id)
+                       WHEN 'progression' THEN (SELECT name FROM progression WHERE id=psi.target_id)
+                   END AS target_name
+            FROM practice_session_item psi
+            WHERE psi.session_id = ?
+            ORDER BY psi.position
+            """,
+            (s["id"],)
+        ).fetchall()
+        result.append({
+            "id": s["id"],
+            "name": s["name"],
+            "created_at": s["created_at"],
+            "items": [dict(i) for i in items]
+        })
+    return jsonify(result)
+
+
+@app.route("/api/practice-sessions", methods=["POST"])
+def create_practice_session():
+    data = request.get_json(force=True)
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    cur = db.execute(
+        "INSERT INTO practice_session (name, created_at) VALUES (?, ?)",
+        (name, now)
+    )
+    db.commit()
+    return jsonify({"id": cur.lastrowid, "name": name, "created_at": now, "items": []}), 201
+
+
+@app.route("/api/practice-sessions/<int:session_id>", methods=["PATCH"])
+def update_practice_session(session_id: int):
+    data = request.get_json(force=True)
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    db = get_db()
+    if not db.execute("SELECT 1 FROM practice_session WHERE id=?", (session_id,)).fetchone():
+        return jsonify({"error": "not found"}), 404
+    db.execute("UPDATE practice_session SET name=? WHERE id=?", (name, session_id))
+    db.commit()
+    return jsonify({"id": session_id, "name": name})
+
+
+@app.route("/api/practice-sessions/<int:session_id>", methods=["DELETE"])
+def delete_practice_session(session_id: int):
+    db = get_db()
+    if not db.execute("SELECT 1 FROM practice_session WHERE id=?", (session_id,)).fetchone():
+        return jsonify({"error": "not found"}), 404
+    db.execute("DELETE FROM practice_session WHERE id=?", (session_id,))
+    db.commit()
+    return ("", 204)
+
+
+@app.route("/api/practice-sessions/<int:session_id>/items", methods=["POST"])
+def add_practice_session_item(session_id: int):
+    data = request.get_json(force=True)
+    target_type = data.get("target_type")
+    target_id = data.get("target_id")
+    if target_type not in ("chord", "progression"):
+        return jsonify({"error": "target_type must be chord or progression"}), 400
+    if not target_id:
+        return jsonify({"error": "target_id required"}), 400
+
+    db = get_db()
+    if not db.execute("SELECT 1 FROM practice_session WHERE id=?", (session_id,)).fetchone():
+        return jsonify({"error": "session not found"}), 404
+
+    pos_row = db.execute(
+        "SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM practice_session_item WHERE session_id=?",
+        (session_id,)
+    ).fetchone()
+    position = pos_row["next_pos"]
+
+    try:
+        duration_seconds = int(data.get("duration_seconds", 120))
+        bpm = int(data.get("bpm", 80))
+        bars_per_chord = int(data.get("bars_per_chord", 1))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid numeric value"}), 400
+
+    time_signature = data.get("time_signature", "4/4")
+    if time_signature not in ("4/4", "3/4", "6/8"):
+        return jsonify({"error": "invalid time_signature"}), 400
+
+    cur = db.execute(
+        """
+        INSERT INTO practice_session_item
+            (session_id, position, target_type, target_id, duration_seconds, bpm, time_signature, bars_per_chord)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (session_id, position, target_type, int(target_id), duration_seconds, bpm, time_signature, bars_per_chord)
+    )
+    db.commit()
+
+    item = db.execute(
+        """
+        SELECT psi.*,
+               CASE psi.target_type
+                   WHEN 'chord' THEN (SELECT display_name FROM chord WHERE id=psi.target_id)
+                   WHEN 'progression' THEN (SELECT name FROM progression WHERE id=psi.target_id)
+               END AS target_name
+        FROM practice_session_item psi
+        WHERE psi.id = ?
+        """,
+        (cur.lastrowid,)
+    ).fetchone()
+    return jsonify(dict(item)), 201
+
+
+@app.route("/api/practice-sessions/<int:session_id>/items/<int:item_id>", methods=["DELETE"])
+def delete_practice_session_item(session_id: int, item_id: int):
+    db = get_db()
+    if not db.execute(
+        "SELECT 1 FROM practice_session_item WHERE id=? AND session_id=?",
+        (item_id, session_id)
+    ).fetchone():
+        return jsonify({"error": "not found"}), 404
+    db.execute("DELETE FROM practice_session_item WHERE id=?", (item_id,))
+    db.commit()
+    return ("", 204)
+
+
+# ---------- Routines (kept for backward compat, not shown in UI) ----------
 
 @app.route("/api/routines", methods=["GET"])
 def list_routines():
@@ -342,9 +705,11 @@ def set_exercise_completed(ex_id: int):
     return jsonify({"id": updated["id"], "completed_at": updated["completed_at"]})
 
 
+# ---------- Sessions ----------
+
 @app.route("/api/sessions", methods=["GET"])
 def list_sessions():
-    limit = min(int(request.args.get("limit", 50)), 500)
+    limit = min(int(request.args.get("limit", 50)), 1000)
     db = get_db()
     rows = db.execute(
         """
@@ -397,6 +762,8 @@ def create_session():
     return jsonify({"id": cur.lastrowid}), 201
 
 
+# ---------- Stats ----------
+
 @app.route("/api/stats/heatmap", methods=["GET"])
 def heatmap():
     days = min(int(request.args.get("days", 365)), 1000)
@@ -416,13 +783,11 @@ def heatmap():
 @app.route("/api/stats/summary", methods=["GET"])
 def summary():
     db = get_db()
-    # Total minutes this week (since Monday) and current streak.
     week_total = db.execute(
         "SELECT COALESCE(SUM(duration_seconds), 0) AS s FROM session "
         "WHERE date(started_at) >= date('now', 'weekday 0', '-6 days')"
     ).fetchone()["s"]
 
-    # Streak: count consecutive days back from today with any session.
     days = db.execute(
         "SELECT DISTINCT date(started_at) AS d FROM session ORDER BY d DESC"
     ).fetchall()
@@ -431,7 +796,6 @@ def summary():
     from datetime import timedelta
     cursor = today
     day_set = {row["d"] for row in days}
-    # If no session today, the streak counts from yesterday backwards.
     if cursor.isoformat() not in day_set:
         cursor = cursor - timedelta(days=1)
     while cursor.isoformat() in day_set:
@@ -443,7 +807,6 @@ def summary():
 
 def ensure_seeded() -> None:
     init_db()
-    # Lazy import so seed.py can import app.DB_PATH back if needed.
     from seed import seed_v1, seed_v2
     with closing(sqlite3.connect(DB_PATH)) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
@@ -454,5 +817,4 @@ def ensure_seeded() -> None:
 
 if __name__ == "__main__":
     ensure_seeded()
-    # 127.0.0.1 only — single-user local app.
     app.run(host="127.0.0.1", port=8765, debug=False)
