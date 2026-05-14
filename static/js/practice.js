@@ -241,9 +241,13 @@
           0
         );
 
+        const pct = totalEx > 0 ? Math.round((doneEx / totalEx) * 100) : 0;
         const overview = document.createElement("div");
         overview.className = "grade-overview";
-        overview.innerHTML = `<strong>Grade ${g}</strong> · <span class="grade-progress">${doneEx} / ${totalEx} exercises complete</span>`;
+        overview.innerHTML = `
+          <strong>Grade ${g}</strong> · <span class="grade-progress">${doneEx} / ${totalEx} exercises complete</span>
+          <div class="grade-prog-bar"><div class="grade-prog-bar-fill" style="width:${pct}%"></div></div>
+        `;
         section.appendChild(overview);
 
         for (const m of modules) {
@@ -260,16 +264,19 @@
       const done = m.exercises.filter((e) => e.completed_at).length;
       const total = m.exercises.length;
 
+      const isComplete = done === total && total > 0;
+
       const header = document.createElement("button");
       header.className = "module-header";
       header.innerHTML = `
-        <span class="caret">▸</span>
+        <span class="caret">▶</span>
         <span class="module-title"></span>
-        <span class="module-progress">${done}/${total}</span>
+        <span class="module-progress ${isComplete ? "complete" : ""}">${done}/${total}${isComplete ? " ✓" : ""}</span>
       `;
       header.querySelector(".module-title").textContent = m.title;
 
       const body = document.createElement("div");
+      // Start hidden via CSS max-height trick; we use .hidden for closed state.
       body.className = "module-body hidden";
 
       if (m.description) {
@@ -284,9 +291,9 @@
       }
 
       header.addEventListener("click", () => {
-        const open = !body.classList.contains("hidden");
-        body.classList.toggle("hidden", open);
-        header.querySelector(".caret").textContent = open ? "▸" : "▾";
+        const isOpen = header.classList.contains("open");
+        header.classList.toggle("open", !isOpen);
+        body.classList.toggle("hidden", isOpen);
       });
 
       mod.appendChild(header);
@@ -380,18 +387,23 @@
     _updateRoutineCounters() {
       // Recompute module + grade counters in-place.
       this.elRoutinesContent.querySelectorAll(".routine-module").forEach((modEl) => {
-        const cards = modEl.querySelectorAll(".exercise-card");
-        const total = cards.length;
+        const total = modEl.querySelectorAll(".exercise-card").length;
         const done = modEl.querySelectorAll(".exercise-card.done").length;
         const counter = modEl.querySelector(".module-progress");
-        if (counter) counter.textContent = `${done}/${total}`;
+        if (counter) {
+          const complete = done === total && total > 0;
+          counter.textContent = `${done}/${total}${complete ? " ✓" : ""}`;
+          counter.classList.toggle("complete", complete);
+        }
       });
       this.elRoutinesContent.querySelectorAll(".routine-grade").forEach((gradeEl) => {
-        const cards = gradeEl.querySelectorAll(".exercise-card");
-        const total = cards.length;
+        const total = gradeEl.querySelectorAll(".exercise-card").length;
         const done = gradeEl.querySelectorAll(".exercise-card.done").length;
+        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
         const counter = gradeEl.querySelector(".grade-progress");
         if (counter) counter.textContent = `${done} / ${total} exercises complete`;
+        const fill = gradeEl.querySelector(".grade-prog-bar-fill");
+        if (fill) fill.style.width = `${pct}%`;
       });
     }
 
@@ -464,7 +476,7 @@
       this._configureMetronome();
     }
 
-    _renderNowPlaying() {
+    _renderNowPlaying(flash) {
       if (!this.selection) {
         this.elCurName.textContent = "—";
         this.elNextWrap.classList.add("hidden");
@@ -485,6 +497,12 @@
         this.elNextName.textContent = nextC.display_name;
         window.ChordDiagram.renderChord(this.elNextSvg, nextC.frets, nextC.fingers, { showFingers: false });
         this.elNextWrap.classList.remove("hidden");
+      }
+      // Flash the chord name on change
+      if (flash) {
+        this.elCurName.style.animation = "none";
+        void this.elCurName.offsetWidth; // reflow to restart animation
+        this.elCurName.style.animation = "chord-flash 0.4s ease";
       }
     }
 
@@ -596,7 +614,7 @@
         const idx = Math.floor(beatIdx / this.beatsPerChord) % chords.length;
         if (idx !== this.currentChordIndex) {
           this.currentChordIndex = idx;
-          this._renderNowPlaying();
+          this._renderNowPlaying(true); // true = flash animation on chord change
         }
         chord = chords[idx];
       }
