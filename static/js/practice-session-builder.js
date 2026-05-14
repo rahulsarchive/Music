@@ -141,7 +141,9 @@
 
       session.items.forEach((item, idx) => {
         const row = document.createElement("div");
-        row.className = "pb-item-row";
+        const isCompleted = !!item.completed_at;
+        row.className = "pb-item-row" + (isCompleted ? " completed" : "");
+        row.dataset.itemId = String(item.id);
 
         const mins = Math.floor(item.duration_seconds / 60);
         const secs = item.duration_seconds % 60;
@@ -149,6 +151,7 @@
 
         row.innerHTML = `
           <span class="pb-item-num">${idx + 1}</span>
+          <span class="pb-item-status" title="Completed">✓</span>
           <div class="pb-item-info">
             <span class="pb-item-target"></span>
             <span class="pb-item-meta">${durStr} · ${item.bpm} bpm · ${item.time_signature}${item.target_type === "progression" ? " · " + item.bars_per_chord + " bars/chord" : ""}</span>
@@ -157,13 +160,9 @@
         row.querySelector(".pb-item-target").textContent = item.target_name || item.target_type;
 
         const startBtn = document.createElement("button");
-        startBtn.className = "btn-primary btn-small";
+        startBtn.className = "btn-primary btn-small pb-item-start";
         startBtn.textContent = "Start";
-        startBtn.addEventListener("click", () => {
-          if (window._practiceInstance) {
-            window._practiceInstance.startBuilderItem(item);
-          }
-        });
+        startBtn.addEventListener("click", () => this._startItem(session, item, row));
 
         const delBtn = document.createElement("button");
         delBtn.className = "pb-item-del";
@@ -174,6 +173,48 @@
         row.appendChild(startBtn);
         row.appendChild(delBtn);
         this.elItemsList.appendChild(row);
+      });
+    }
+
+    async _startItem(session, item, row) {
+      if (!window._practiceInstance) return;
+
+      // Visually clear any other playing rows, mark this one playing,
+      // strip any completed checkmark (we're re-practicing it).
+      this.elItemsList.querySelectorAll(".pb-item-row.playing")
+        .forEach((r) => r.classList.remove("playing"));
+      row.classList.add("playing");
+      row.classList.remove("completed");
+
+      // Clear persisted completion on the server too, so a manual stop
+      // doesn't leave a stale checkmark.
+      if (item.completed_at) {
+        try {
+          await fetch(`/api/practice-sessions/${session.id}/items/${item.id}/complete`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ completed: false }),
+          });
+          item.completed_at = null;
+        } catch (_) {}
+      }
+
+      window._practiceInstance.startBuilderItem(item, async (status) => {
+        row.classList.remove("playing");
+        if (status === "complete") {
+          try {
+            const res = await fetch(`/api/practice-sessions/${session.id}/items/${item.id}/complete`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ completed: true }),
+            });
+            if (res.ok) {
+              const updated = await res.json();
+              item.completed_at = updated.completed_at;
+              row.classList.add("completed");
+            }
+          } catch (_) {}
+        }
       });
     }
 

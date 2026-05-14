@@ -1854,10 +1854,41 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
   border-left: 3px solid var(--accent-cyan);
   padding: 11px 12px;
   border-radius: var(--radius-sm);
-  transition: border-color var(--transition);
+  transition: border-color var(--transition), background var(--transition),
+              box-shadow var(--transition);
 }
 
 .pb-item-row:hover { border-color: var(--accent-cyan); }
+
+.pb-item-row.playing {
+  border-color: var(--accent-lime);
+  border-left-color: var(--accent-lime);
+  background: rgba(181, 255, 58, 0.06);
+  box-shadow: 0 0 0 1px rgba(181, 255, 58, 0.3), 0 4px 16px var(--glow-lime);
+}
+
+.pb-item-row.completed {
+  border-left-color: var(--accent-lime);
+  background: rgba(181, 255, 58, 0.04);
+}
+
+.pb-item-row.completed .pb-item-target {
+  color: var(--accent-lime);
+}
+
+.pb-item-status {
+  display: none;
+  width: 18px;
+  height: 18px;
+  color: var(--accent-lime);
+  font-weight: 800;
+  font-size: 14px;
+  text-align: center;
+  line-height: 18px;
+  flex-shrink: 0;
+}
+
+.pb-item-row.completed .pb-item-status { display: inline-block; }
 
 .pb-item-num {
   font-size: 12px;

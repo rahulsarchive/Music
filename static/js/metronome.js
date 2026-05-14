@@ -56,6 +56,7 @@
 
       // 4 bars with internal beat ticks
       this.bars = [];
+      this.barChordTexts = [];
       const barW = W / this.totalBars;
       for (let b = 0; b < this.totalBars; b++) {
         const x = b * barW;
@@ -63,18 +64,36 @@
         if (b > 0) {
           el("line", { x1: x, y1: 6, x2: x, y2: H - 6, stroke: "#3a3a45", "stroke-width": 1.5 }, svg);
         }
-        // bar number label
+        // bar number label (small, top-left)
         el("text", {
-          x: x + 8, y: 18,
-          fill: "#8a8a96",
-          "font-size": 11,
+          x: x + 6, y: 13,
+          fill: "#5a5a66",
+          "font-size": 9,
           "font-family": "sans-serif",
           "font-weight": 600,
-        }, svg).textContent = `Bar ${b + 1}`;
+          "letter-spacing": "0.5",
+        }, svg).textContent = `${b + 1}`;
+        // Chord label (large, centered top)
+        const chordText = el("text", {
+          x: x + barW / 2,
+          y: 26,
+          fill: "#b5ff3a",
+          "font-size": 18,
+          "font-family": "sans-serif",
+          "font-weight": 800,
+          "text-anchor": "middle",
+          "data-bar-chord": b,
+        }, svg);
+        this.barChordTexts.push(chordText);
       }
 
       // Beat ticks
       this._renderBeatTicks();
+
+      // Re-apply any pending chord labels after rebuild
+      if (this._pendingBarChords) {
+        this.setBarChords(this._pendingBarChords);
+      }
 
       // Playhead line — drawn last so it sits on top
       this.playhead = el("line", {
@@ -85,6 +104,14 @@
         filter: "drop-shadow(0 0 6px rgba(46, 229, 255, 0.8))",
       }, svg);
       this.playhead.style.transform = "translateX(0px)";
+    }
+
+    setBarChords(labels) {
+      this._pendingBarChords = labels;
+      if (!this.barChordTexts) return;
+      for (let i = 0; i < this.barChordTexts.length; i++) {
+        this.barChordTexts[i].textContent = (labels && labels[i]) || "";
+      }
     }
 
     _renderBeatTicks() {

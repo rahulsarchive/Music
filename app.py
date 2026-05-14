@@ -163,6 +163,10 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_psi_session ON practice_session_item(session_id);
             """
         )
+        # Lightweight migration: add completed_at column if it's missing
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(practice_session_item)").fetchall()]
+        if "completed_at" not in cols:
+            conn.execute("ALTER TABLE practice_session_item ADD COLUMN completed_at TEXT")
         conn.commit()
 
 
@@ -645,6 +649,35 @@ def delete_practice_session_item(session_id: int, item_id: int):
     db.execute("DELETE FROM practice_session_item WHERE id=?", (item_id,))
     db.commit()
     return ("", 204)
+
+
+@app.route("/api/practice-sessions/<int:session_id>/items/<int:item_id>/complete", methods=["POST"])
+def set_practice_item_completed(session_id: int, item_id: int):
+    data = request.get_json(force=True) or {}
+    completed = bool(data.get("completed", True))
+    db = get_db()
+    row = db.execute(
+        "SELECT 1 FROM practice_session_item WHERE id=? AND session_id=?",
+        (item_id, session_id)
+    ).fetchone()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    if completed:
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "UPDATE practice_session_item SET completed_at=? WHERE id=?",
+            (now, item_id)
+        )
+    else:
+        db.execute(
+            "UPDATE practice_session_item SET completed_at=NULL WHERE id=?",
+            (item_id,)
+        )
+    db.commit()
+    updated = db.execute(
+        "SELECT id, completed_at FROM practice_session_item WHERE id=?", (item_id,)
+    ).fetchone()
+    return jsonify({"id": updated["id"], "completed_at": updated["completed_at"]})
 
 
 # ---------- Routines (kept for backward compat, not shown in UI) ----------

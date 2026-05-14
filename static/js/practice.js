@@ -549,6 +549,25 @@
         ? (parseInt(this.elBpc.value, 10) || 1) : 1;
       this.beatsPerChord = this.beatsPerBar * bpc;
       this.metronome.configure({ bpm, beatsPerBar: this.beatsPerBar, totalBars: TOTAL_BARS });
+      this._updateBarChordLabels(0);
+    }
+
+    _updateBarChordLabels(beatIdxAtLoopStart) {
+      if (!this.metronome) return;
+      if (!this.selection) { this.metronome.setBarChords([]); return; }
+      const labels = [];
+      if (this.selection.type === "chord") {
+        const name = this.selection.chord.display_name;
+        for (let i = 0; i < TOTAL_BARS; i++) labels.push(name);
+      } else {
+        const chords = this.selection.progression.chords;
+        for (let i = 0; i < TOTAL_BARS; i++) {
+          const beatAtBarStart = beatIdxAtLoopStart + i * this.beatsPerBar;
+          const idx = Math.floor(beatAtBarStart / this.beatsPerChord) % chords.length;
+          labels.push(chords[idx].display_name);
+        }
+      }
+      this.metronome.setBarChords(labels);
     }
 
     _setAudioMode(mode) {
@@ -624,19 +643,48 @@
         notes: null,
       };
       this.session = null;
-      this._saveSession(payload);
+
+      // Builder-item end callback fires AFTER saving so the builder can update its UI
+      const cb = this._builderItemEndCallback;
+      const natural = !!this._builderItemNaturalEnd;
+      this._builderItemEndCallback = null;
+      this._builderItemNaturalEnd = false;
+      this.targetDurationSec = null;
+
+      this._saveSession(payload).then(() => {
+        if (cb) cb(natural ? "complete" : "abort");
+      });
     }
 
     _tickTimer() {
       if (!this.session) return;
-      const sec = Math.floor((Date.now() - this.session.startedAtMs) / 1000);
-      const m = Math.floor(sec / 60);
-      const s = sec % 60;
-      this.elTimer.textContent = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+      const elapsedSec = Math.floor((Date.now() - this.session.startedAtMs) / 1000);
+
+      if (this.targetDurationSec) {
+        const remaining = Math.max(0, this.targetDurationSec - elapsedSec);
+        const m = Math.floor(remaining / 60);
+        const s = remaining % 60;
+        this.elTimer.textContent = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+        if (remaining <= 0) {
+          // Natural completion — flag and stop
+          this._builderItemNaturalEnd = true;
+          this._stop();
+        }
+      } else {
+        const m = Math.floor(elapsedSec / 60);
+        const s = elapsedSec % 60;
+        this.elTimer.textContent = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+      }
     }
 
     onBeat(beatIdx, audioTime) {
       if (!this.selection) return;
+
+      // Refresh the bar chord overlay at the start of each visual 4-bar loop
+      const totalBeatsPerLoop = TOTAL_BARS * this.beatsPerBar;
+      if (beatIdx % totalBeatsPerLoop === 0) {
+        this._updateBarChordLabels(beatIdx);
+      }
 
       let chord;
       if (this.selection.type === "chord") {
@@ -671,8 +719,10 @@
       await window.History.refresh();
     }
 
-    // Called by practice-session-builder when starting an item
-    startBuilderItem(item) {
+    // Called by practice-session-builder when starting an item.
+    // Stays on the practice-builder tab; runs the metronome for the item's
+    // configured duration and invokes onEnd("complete"|"abort") when done.
+    startBuilderItem(item, onEnd) {
       if (this.metronome && this.metronome.isRunning) this._stop();
 
       this.elBpm.value = item.bpm;
@@ -683,36 +733,28 @@
       if (item.target_type === "chord") {
         const chord = this.chords.find((c) => c.id === item.target_id);
         if (!chord) { alert("Chord not found"); return; }
-        // Reset category to "all" so the chord is visible
-        this.activeChordCategoryId = "all";
-        this._switchTab("chord");
-        this._clearSelectionUi();
-        this._renderChordCategoryBar();
-        this.elChordCatActions.classList.add("hidden");
-        this._renderChordGrid();
-        const card = this.elChordGrid.querySelector(`.chord-card[data-chord-id="${chord.id}"]`);
-        if (card) card.classList.add("selected");
         this.selection = { type: "chord", id: chord.id, chord };
         this.elBpcWrap.classList.add("hidden");
       } else {
         const prog = this.progressions.find((p) => p.id === item.target_id);
         if (!prog) { alert("Progression not found"); return; }
-        this.activeProgCategoryId = "all";
-        this._switchTab("progression");
-        this._clearSelectionUi();
-        this._renderProgCategoryBar();
-        this.elProgCatActions.classList.add("hidden");
-        this._renderProgressionGrid();
-        const card = this.elProgGrid.querySelector(`.prog-card[data-prog-id="${prog.id}"]`);
-        if (card) card.classList.add("selected");
         this.selection = { type: "progression", id: prog.id, progression: prog };
         this.elBpcWrap.classList.remove("hidden");
       }
+
+      // Clear card-grid "selected" state — we're not on those tabs and
+      // the builder item is the source of truth for what's playing.
+      this._clearSelectionUi();
 
       this.currentChordIndex = 0;
       this._renderNowPlaying();
       this.elPlayBtn.disabled = false;
       this._configureMetronome();
+
+      this.targetDurationSec = item.duration_seconds;
+      this._builderItemEndCallback = onEnd || null;
+      this._builderItemNaturalEnd = false;
+
       this._start();
     }
   }
