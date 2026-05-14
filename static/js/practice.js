@@ -601,9 +601,9 @@
         chord = chords[idx];
       }
 
-      // Strum on the downbeat of each bar.
-      if (this.chordAudio && this.audioMode !== "tick"
-          && beatIdx % this.beatsPerBar === 0) {
+      // Strum a downstroke on every beat — steady pulse, like a player
+      // keeping time. Future strumming-pattern tab will replace this.
+      if (this.chordAudio && this.audioMode !== "tick") {
         this.chordAudio.play(audioTime, chord.frets);
       }
     }

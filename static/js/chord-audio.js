@@ -16,6 +16,7 @@
   const BUFFER_SECONDS = 1.2;
   const STRING_STAGGER_S = 0.006;   // 6 ms between strings = ~30ms total strum
   const STRING_GAIN = 0.16;
+  const MASTER_GAIN = 0.7;          // per-strum bus attenuation
   const LOWPASS_HZ = 3800;
 
   class ChordAudio {
@@ -29,12 +30,22 @@
       if (!this.ctx) return;
       const ctx = this.ctx;
 
-      // Master bus per pluck: lowpass to take the edge off, into destination.
+      // Per-strum filter + master bus. Created fresh each call so a single
+      // bad filter state can't kill audio for the whole session. All nodes
+      // are torn down once the last source ends.
       const filter = ctx.createBiquadFilter();
       filter.type = "lowpass";
       filter.frequency.value = LOWPASS_HZ;
       filter.Q.value = 0.4;
-      filter.connect(ctx.destination);
+
+      const master = ctx.createGain();
+      master.gain.value = MASTER_GAIN;
+
+      filter.connect(master);
+      master.connect(ctx.destination);
+
+      const gains = [];
+      let activeCount = 0;
 
       for (let i = 0; i < 6; i++) {
         const fret = frets[i];
@@ -47,10 +58,28 @@
 
         const gain = ctx.createGain();
         gain.gain.value = STRING_GAIN;
+        gains.push(gain);
 
         src.connect(gain).connect(filter);
         src.start(time + i * STRING_STAGGER_S);
         src.stop(time + i * STRING_STAGGER_S + BUFFER_SECONDS + 0.05);
+        activeCount++;
+
+        src.onended = () => {
+          try { src.disconnect(); } catch (_) {}
+          activeCount--;
+          if (activeCount === 0) {
+            for (const g of gains) { try { g.disconnect(); } catch (_) {} }
+            try { filter.disconnect(); } catch (_) {}
+            try { master.disconnect(); } catch (_) {}
+          }
+        };
+      }
+
+      // All strings muted — nothing scheduled, so tear down the empty graph.
+      if (activeCount === 0) {
+        filter.disconnect();
+        master.disconnect();
       }
     }
 
@@ -66,20 +95,23 @@
       buf = this.ctx.createBuffer(1, totalSamples, sampleRate);
       const data = buf.getChannelData(0);
 
-      // Seed: bandlimited noise for the first N samples.
-      // Use a slight low-pass smoothing on the seed to reduce harshness.
+      // Seed N+1 samples of bandlimited noise (indices 0..N inclusive).
+      // The 2-tap feedback reads data[i-N] and data[i-N-1]; the loop starts
+      // at i=N+1, so the earliest second tap is data[0] — always in range.
+      // Seeding N+1 (not just N) ensures data[N] is real noise, not a zero
+      // that would punch a hole in the resonance every N samples.
       let prev = 0;
-      for (let i = 0; i < N; i++) {
+      for (let i = 0; i <= N; i++) {
         const noise = (Math.random() * 2 - 1) * 0.5;
         const smoothed = 0.5 * (noise + prev);
         data[i] = smoothed;
         prev = noise;
       }
 
-      // Karplus-Strong loop with simple 2-tap average (acts as a low-pass).
-      // The 0.498 feedback factor gives a long but finite decay.
+      // Karplus-Strong feedback loop. Both taps are always in-range because
+      // the seed covers 0..N and the loop starts at N+1.
       const decay = 0.498;
-      for (let i = N; i < totalSamples; i++) {
+      for (let i = N + 1; i < totalSamples; i++) {
         data[i] = decay * (data[i - N] + data[i - N - 1]);
       }
 
