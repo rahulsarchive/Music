@@ -4,8 +4,9 @@
  *   E2=82.41, A2=110.0, D3=146.83, G3=196.0, B3=246.94, E4=329.63
  *
  * For each non-muted string i in `frets`, frequency = openFreq[i] * 2^(fret/12).
- * Generate a 1 s mono AudioBuffer per pitch (cached), then schedule six
- * AudioBufferSourceNodes with a 5 ms stagger to feel like a downstroke.
+ * Generate a multi-second mono AudioBuffer per pitch (cached) with slow
+ * Karplus-Strong decay, then schedule six AudioBufferSourceNodes with a
+ * ~12 ms stagger to feel like an acoustic downstroke ringing out.
  *
  * Public API:
  *   const audio = new ChordAudio(audioCtx);
@@ -13,11 +14,12 @@
  */
 (function () {
   const TUNING_HZ = [82.41, 110.0, 146.83, 196.0, 246.94, 329.63];
-  const BUFFER_SECONDS = 1.2;
-  const STRING_STAGGER_S = 0.006;   // 6 ms between strings = ~30ms total strum
+  const BUFFER_SECONDS = 3.5;       // long enough to ring under a full bar at slow tempos
+  const STRING_STAGGER_S = 0.012;   // 12 ms stagger → ~70 ms strum, more "human" hand
   const STRING_GAIN = 0.16;
   const MASTER_GAIN = 0.7;          // per-strum bus attenuation
   const LOWPASS_HZ = 3800;
+  const KS_DECAY = 0.4995;          // closer to 0.5 = slower fade = longer sustain
 
   class ChordAudio {
     constructor(audioCtx) {
@@ -110,13 +112,12 @@
 
       // Karplus-Strong feedback loop. Both taps are always in-range because
       // the seed covers 0..N and the loop starts at N+1.
-      const decay = 0.498;
       for (let i = N + 1; i < totalSamples; i++) {
-        data[i] = decay * (data[i - N] + data[i - N - 1]);
+        data[i] = KS_DECAY * (data[i - N] + data[i - N - 1]);
       }
 
-      // Light fade-out at the tail to avoid clicks if cut early.
-      const fadeStart = totalSamples - Math.floor(sampleRate * 0.05);
+      // Longer fade-out at the tail to avoid clicks if the source is cut early.
+      const fadeStart = totalSamples - Math.floor(sampleRate * 0.15);
       for (let i = fadeStart; i < totalSamples; i++) {
         const t = (i - fadeStart) / (totalSamples - fadeStart);
         data[i] *= 1 - t;
