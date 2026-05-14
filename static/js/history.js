@@ -53,17 +53,17 @@
     const yMax = step * 4;
 
     ctx.textBaseline = "middle";
-    ctx.font = `11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    ctx.font = `11px 'JetBrains Mono', 'Fira Code', monospace`;
     for (let i = 0; i <= 4; i++) {
       const val = step * i;
       const y = PAD.top + cH - (val / yMax) * cH;
-      ctx.strokeStyle = i === 0 ? "#4a4a58" : "#2b2b38";
+      ctx.strokeStyle = i === 0 ? "#cbd5e1" : "#e2e8f0";
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(PAD.left, y);
       ctx.lineTo(PAD.left + cW, y);
       ctx.stroke();
-      ctx.fillStyle = "#6a6a7a";
+      ctx.fillStyle = "#64748b";
       ctx.textAlign = "right";
       ctx.fillText(`${val}m`, PAD.left - 6, y);
     }
@@ -79,27 +79,28 @@
 
       if (d.total_seconds > 0) {
         const grad = ctx.createLinearGradient(0, y, 0, PAD.top + cH);
-        grad.addColorStop(0, "#2ee5ff");
-        grad.addColorStop(1, "rgba(255,61,139,0.7)");
+        grad.addColorStop(0, "#9333ea");
+        grad.addColorStop(0.6, "#7c3aed");
+        grad.addColorStop(1, "rgba(2, 132, 199, 0.85)");
         ctx.fillStyle = grad;
       } else {
-        ctx.fillStyle = "#252532";
+        ctx.fillStyle = "#f1f5f9";
       }
 
-      roundRect(ctx, x, y, barW, hPx, 3);
+      roundRect(ctx, x, y, barW, hPx, 6);
       ctx.fill();
 
       if (d.total_seconds > 0 && hPx > 4) {
-        ctx.shadowColor = "rgba(46,229,255,0.4)";
-        ctx.shadowBlur = 8;
-        roundRect(ctx, x, y, barW, hPx, 3);
+        ctx.shadowColor = "rgba(147, 51, 234, 0.45)";
+        ctx.shadowBlur = 12;
+        roundRect(ctx, x, y, barW, hPx, 6);
         ctx.fill();
         ctx.shadowBlur = 0;
       }
 
-      ctx.fillStyle = "#7a7a8a";
+      ctx.fillStyle = "#64748b";
       ctx.textAlign = "center";
-      ctx.font = `10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+      ctx.font = `10px 'JetBrains Mono', 'Fira Code', monospace`;
       const label = d.label || "";
       const parts = label.split(" ");
       if (parts.length === 2 && barW < 40) {
@@ -111,10 +112,10 @@
     });
 
     if (data.every(d => d.total_seconds === 0)) {
-      ctx.fillStyle = "#4a4a5a";
+      ctx.fillStyle = "#94a3b8";
       ctx.textAlign = "center";
-      ctx.font = `13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
-      ctx.fillText("No practice recorded yet", W / 2, PAD.top + cH / 2);
+      ctx.font = `13px 'Plus Jakarta Sans', sans-serif`;
+      ctx.fillText("No practice recorded yet — pick a chord and hit start.", W / 2, PAD.top + cH / 2);
     }
   }
 

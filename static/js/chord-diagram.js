@@ -52,12 +52,12 @@
     const stringSpacing = (W - padLeft - padRight) / 5; // 6 strings, 5 gaps
     const fretSpacing = (H - padTop - padBottom) / visibleFrets;
 
-    const stringColor = "#bdbdc6";
-    const fretColor = "#6b6b78";
-    const dotColor = "#ff3d8b"; // accent-pink
-    const openColor = "#b5ff3a"; // lime
-    const mutedColor = "#8a8a96";
-    const textColor = "#e8e8ee";
+    const stringColor = "#64748b";
+    const fretColor = "#334155";
+    const dotColor = "#9333ea";
+    const openColor = "#16a34a";
+    const mutedColor = "#94a3b8";
+    const textColor = "#0f172a";
 
     // Nut or position label
     if (showNut) {

@@ -4,6 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Guitar Practice Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
 </head>
 <body>
@@ -31,23 +34,23 @@
         </div>
         <aside class="progress-metrics" id="progress-metrics">
           <div class="metric-card">
-            <div class="metric-label">Avg Min / Day</div>
+            <div class="metric-label">⏱ Avg / Day</div>
             <div class="metric-value cyan" id="metric-avg-min">—</div>
           </div>
           <div class="metric-card">
-            <div class="metric-label">Most Active</div>
+            <div class="metric-label">🕐 Peak Hour</div>
             <div class="metric-value" id="metric-active-time">—</div>
           </div>
           <div class="metric-card">
-            <div class="metric-label">Current Streak</div>
+            <div class="metric-label">🔥 Streak</div>
             <div class="metric-value lime" id="metric-streak">—</div>
           </div>
           <div class="metric-card">
-            <div class="metric-label">Best Streak</div>
+            <div class="metric-label">🏆 Best Streak</div>
             <div class="metric-value" id="metric-best-streak">—</div>
           </div>
           <div class="metric-card">
-            <div class="metric-label">This Week</div>
+            <div class="metric-label">📅 This Week</div>
             <div class="metric-value" id="stat-week">0m</div>
           </div>
         </aside>

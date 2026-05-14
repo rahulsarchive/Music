@@ -42,7 +42,7 @@
       el("rect", {
         x: padLeft - 1, y: padTop - 3,
         width: stringSpacing * 5 + 2, height: 4,
-        fill: "#e8e8ee", rx: 1.5,
+        fill: "#0f172a", rx: 1.5,
       }, svg);
 
       // Fret lines
@@ -50,7 +50,7 @@
         const y = padTop + i * fretSpacing;
         el("line", {
           x1: padLeft, y1: y, x2: padLeft + stringSpacing * 5, y2: y,
-          stroke: "#6b6b78", "stroke-width": 1,
+          stroke: "#334155", "stroke-width": 1,
         }, svg);
       }
 
@@ -59,7 +59,7 @@
         const x = padLeft + s * stringSpacing;
         el("line", {
           x1: x, y1: padTop, x2: x, y2: padTop + fretSpacing * NUM_FRETS,
-          stroke: "#bdbdc6", "stroke-width": 1.2,
+          stroke: "#64748b", "stroke-width": 1.2,
         }, svg);
       }
 
@@ -67,8 +67,8 @@
       for (let i = 1; i <= NUM_FRETS; i++) {
         el("text", {
           x: padLeft - 8, y: padTop + (i - 0.5) * fretSpacing + 4,
-          fill: "#8a8a96", "font-size": 11, "text-anchor": "end",
-          "font-family": "sans-serif",
+          fill: "#94a3b8", "font-size": 11, "text-anchor": "end",
+          "font-family": "'Plus Jakarta Sans', sans-serif",
         }, svg).textContent = String(i);
       }
 
@@ -88,9 +88,9 @@
         }, g);
         const marker = el("text", {
           x: x, y: padTop - 12,
-          fill: "#8a8a96",
+          fill: "#94a3b8",
           "font-size": 18, "text-anchor": "middle",
-          "font-family": "sans-serif", "font-weight": "700",
+          "font-family": "'Plus Jakarta Sans', sans-serif", "font-weight": "700",
         }, g);
         marker.textContent = "×";
         g.addEventListener("click", () => this._toggleStringTop(s));
@@ -144,10 +144,10 @@
         const v = this.frets[s];
         if (v === null) {
           m.textContent = "×";
-          m.setAttribute("fill", "#8a8a96");
+          m.setAttribute("fill", "#94a3b8");
         } else if (v === 0) {
           m.textContent = "O";
-          m.setAttribute("fill", "#b5ff3a");
+          m.setAttribute("fill", "#16a34a");
         } else {
           m.textContent = "";
         }
@@ -164,7 +164,7 @@
         const y = padTop + (f - 0.5) * fretSpacing;
         el("circle", {
           cx: x, cy: y, r: Math.min(stringSpacing, fretSpacing) * 0.32,
-          fill: "#ff3d8b",
+          fill: "#9333ea",
         }, this.dotsLayer);
       }
     }
@@ -180,7 +180,7 @@
         this._renderDots();
         this.textInput.style.borderColor = "";
       } else {
-        this.textInput.style.borderColor = "#ff3d8b";
+        this.textInput.style.borderColor = "#db2777";
       }
     }
 
@@ -202,7 +202,7 @@
     async _save() {
       const name = this.nameInput.value.trim();
       if (!name) {
-        this.nameInput.style.borderColor = "#ff3d8b";
+        this.nameInput.style.borderColor = "#db2777";
         this.nameInput.focus();
         return;
       }

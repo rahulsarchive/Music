@@ -52,7 +52,7 @@
       // viewBox 0 0 1000 80
       const W = 1000, H = 80;
       // Background lane
-      el("rect", { x: 0, y: 0, width: W, height: H, fill: "#1a1a1f", rx: 6 }, svg);
+      el("rect", { x: 0, y: 0, width: W, height: H, fill: "#0f172a", rx: 6 }, svg);
 
       // 4 bars with internal beat ticks
       this.bars = [];
@@ -62,14 +62,14 @@
         const x = b * barW;
         // bar separator (skip leftmost)
         if (b > 0) {
-          el("line", { x1: x, y1: 6, x2: x, y2: H - 6, stroke: "#3a3a45", "stroke-width": 1.5 }, svg);
+          el("line", { x1: x, y1: 6, x2: x, y2: H - 6, stroke: "#1e293b", "stroke-width": 1.5 }, svg);
         }
         // bar number label (small, top-left)
         el("text", {
           x: x + 6, y: 13,
-          fill: "#5a5a66",
+          fill: "#475569",
           "font-size": 9,
-          "font-family": "sans-serif",
+          "font-family": "'Plus Jakarta Sans', sans-serif",
           "font-weight": 600,
           "letter-spacing": "0.5",
         }, svg).textContent = `${b + 1}`;
@@ -77,9 +77,9 @@
         const chordText = el("text", {
           x: x + barW / 2,
           y: 26,
-          fill: "#b5ff3a",
+          fill: "#eab308",
           "font-size": 18,
-          "font-family": "sans-serif",
+          "font-family": "'Plus Jakarta Sans', sans-serif",
           "font-weight": 800,
           "text-anchor": "middle",
           "data-bar-chord": b,
@@ -98,10 +98,10 @@
       // Playhead line — drawn last so it sits on top
       this.playhead = el("line", {
         x1: 0, y1: 4, x2: 0, y2: H - 4,
-        stroke: "#2ee5ff",
+        stroke: "#9333ea",
         "stroke-width": 2.5,
         opacity: 0.95,
-        filter: "drop-shadow(0 0 6px rgba(46, 229, 255, 0.8))",
+        filter: "drop-shadow(0 0 6px rgba(147, 51, 234, 0.7))",
       }, svg);
       this.playhead.style.transform = "translateX(0px)";
     }
@@ -131,7 +131,7 @@
           cx: x + beatW / 2,
           cy,
           r,
-          fill: isDownbeat ? "#ff3d8b" : "#5a5a68",
+          fill: isDownbeat ? "#db2777" : "#475569",
           opacity: 0.55,
           "data-tick": i,
         }, this.svg);
@@ -239,11 +239,11 @@
         const i = Number(t.getAttribute("data-tick"));
         const isDownbeat = i % this.beatsPerBar === 0;
         if (i === idx) {
-          t.setAttribute("fill", isDownbeat ? "#b5ff3a" : "#2ee5ff");
+          t.setAttribute("fill", isDownbeat ? "#eab308" : "#9333ea");
           t.setAttribute("opacity", "1");
           t.setAttribute("r", isDownbeat ? "8" : "5");
         } else {
-          t.setAttribute("fill", isDownbeat ? "#ff3d8b" : "#5a5a68");
+          t.setAttribute("fill", isDownbeat ? "#db2777" : "#475569");
           t.setAttribute("opacity", "0.55");
           t.setAttribute("r", isDownbeat ? "6" : "3.5");
         }
