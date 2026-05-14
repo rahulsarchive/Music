@@ -8,7 +8,7 @@ import json
 import os
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import date as date_cls, datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import Flask, g, jsonify, render_template, request
@@ -710,7 +710,9 @@ def set_exercise_completed(ex_id: int):
 @app.route("/api/sessions", methods=["GET"])
 def list_sessions():
     limit = min(int(request.args.get("limit", 50)), 1000)
+    offset = max(int(request.args.get("offset", 0)), 0)
     db = get_db()
+    total = db.execute("SELECT COUNT(*) AS n FROM session").fetchone()["n"]
     rows = db.execute(
         """
         SELECT s.*,
@@ -720,11 +722,22 @@ def list_sessions():
                END AS target_name
         FROM session s
         ORDER BY s.started_at DESC
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """,
-        (limit,),
+        (limit, offset),
     ).fetchall()
-    return jsonify([dict(r) for r in rows])
+    return jsonify({"items": [dict(r) for r in rows], "total": total})
+
+
+@app.route("/api/sessions/<int:session_id>", methods=["DELETE"])
+def delete_session(session_id: int):
+    db = get_db()
+    row = db.execute("SELECT 1 FROM session WHERE id=?", (session_id,)).fetchone()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    db.execute("DELETE FROM session WHERE id=?", (session_id,))
+    db.commit()
+    return ("", 204)
 
 
 @app.route("/api/sessions", methods=["POST"])
@@ -780,29 +793,136 @@ def heatmap():
     return jsonify([{"date": r["d"], "total_seconds": r["total"]} for r in rows])
 
 
+@app.route("/api/stats/progress", methods=["GET"])
+def progress_stats():
+    range_type = request.args.get("range", "days")
+    db = get_db()
+    today = datetime.now(timezone.utc).date()
+
+    if range_type == "days":
+        periods = [(today - timedelta(days=i)) for i in range(9, -1, -1)]
+        rows = db.execute(
+            """
+            SELECT date(started_at) AS d, SUM(duration_seconds) AS total_seconds
+            FROM session WHERE date(started_at) >= ? GROUP BY d
+            """,
+            (periods[0].isoformat(),),
+        ).fetchall()
+        by_key = {r["d"]: r["total_seconds"] for r in rows}
+        return jsonify([
+            {"label": f"{d.day} {d.strftime('%b')}", "total_seconds": by_key.get(d.isoformat(), 0)}
+            for d in periods
+        ])
+
+    elif range_type == "weeks":
+        days_since_monday = today.weekday()
+        current_monday = today - timedelta(days=days_since_monday)
+        week_starts = [(current_monday - timedelta(weeks=i)) for i in range(9, -1, -1)]
+        rows = db.execute(
+            """
+            SELECT date(started_at) AS d, SUM(duration_seconds) AS total_seconds
+            FROM session WHERE date(started_at) >= ? GROUP BY d
+            """,
+            (week_starts[0].isoformat(),),
+        ).fetchall()
+        by_date = {r["d"]: r["total_seconds"] for r in rows}
+        return jsonify([
+            {
+                "label": ws.strftime("%b %d"),
+                "total_seconds": sum(
+                    by_date.get((ws + timedelta(days=j)).isoformat(), 0) for j in range(7)
+                ),
+            }
+            for ws in week_starts
+        ])
+
+    elif range_type == "months":
+        year, month = today.year, today.month
+        months = []
+        for _ in range(10):
+            months.append((year, month))
+            month -= 1
+            if month == 0:
+                month = 12
+                year -= 1
+        months.reverse()
+        rows = db.execute(
+            """
+            SELECT strftime('%Y-%m', started_at) AS ym, SUM(duration_seconds) AS total_seconds
+            FROM session WHERE date(started_at) >= ? GROUP BY ym
+            """,
+            (date_cls(months[0][0], months[0][1], 1).isoformat(),),
+        ).fetchall()
+        by_month = {r["ym"]: r["total_seconds"] for r in rows}
+        return jsonify([
+            {
+                "label": datetime(y, m, 1).strftime("%b '%y"),
+                "total_seconds": by_month.get(f"{y:04d}-{m:02d}", 0),
+            }
+            for y, m in months
+        ])
+
+    return jsonify([])
+
+
 @app.route("/api/stats/summary", methods=["GET"])
 def summary():
     db = get_db()
+    today = datetime.now(timezone.utc).date()
+
     week_total = db.execute(
         "SELECT COALESCE(SUM(duration_seconds), 0) AS s FROM session "
         "WHERE date(started_at) >= date('now', 'weekday 0', '-6 days')"
     ).fetchone()["s"]
 
-    days = db.execute(
-        "SELECT DISTINCT date(started_at) AS d FROM session ORDER BY d DESC"
+    day_rows = db.execute(
+        "SELECT DISTINCT date(started_at) AS d FROM session ORDER BY d"
     ).fetchall()
+    day_set = {row["d"] for row in day_rows}
+    sorted_days = sorted(day_set)
+
     streak = 0
-    today = datetime.now(timezone.utc).date()
-    from datetime import timedelta
     cursor = today
-    day_set = {row["d"] for row in days}
     if cursor.isoformat() not in day_set:
         cursor = cursor - timedelta(days=1)
     while cursor.isoformat() in day_set:
         streak += 1
         cursor = cursor - timedelta(days=1)
 
-    return jsonify({"week_seconds": int(week_total), "streak_days": streak})
+    longest = 0
+    if sorted_days:
+        run = 1
+        for i in range(1, len(sorted_days)):
+            prev = datetime.strptime(sorted_days[i - 1], "%Y-%m-%d").date()
+            curr = datetime.strptime(sorted_days[i], "%Y-%m-%d").date()
+            if (curr - prev).days == 1:
+                run += 1
+            else:
+                longest = max(longest, run)
+                run = 1
+        longest = max(longest, run)
+
+    avg_row = db.execute(
+        "SELECT COALESCE(SUM(duration_seconds), 0) AS total FROM session "
+        "WHERE date(started_at) >= date('now', '-29 days')"
+    ).fetchone()
+    avg_min_per_day = round(avg_row["total"] / 30 / 60, 1)
+
+    hour_row = db.execute(
+        """
+        SELECT CAST(strftime('%H', started_at) AS INTEGER) AS hour, COUNT(*) AS cnt
+        FROM session GROUP BY hour ORDER BY cnt DESC LIMIT 1
+        """
+    ).fetchone()
+    most_active_hour = int(hour_row["hour"]) if hour_row else None
+
+    return jsonify({
+        "week_seconds": int(week_total),
+        "streak_days": streak,
+        "longest_streak": longest,
+        "avg_min_per_day": avg_min_per_day,
+        "most_active_hour": most_active_hour,
+    })
 
 
 def ensure_seeded() -> None:

@@ -45,6 +45,7 @@
 
     const sessionBuilder = new window.PracticeSessionBuilder();
 
+    window.History.init();
     await Promise.all([
       practice.loadData(),
       window.History.refresh(),

@@ -10,7 +10,6 @@
   <header class="topbar">
     <h1><span class="topbar-icon">🎸</span> Guitar Practice <span class="accent">Tracker</span></h1>
     <div class="topstats">
-      <div class="stat"><div class="stat-label">This week</div><div class="stat-value" id="stat-week">0m</div></div>
       <div class="stat"><div class="stat-label">Streak</div><div class="stat-value lime" id="stat-streak">0d</div></div>
     </div>
   </header>
@@ -18,18 +17,40 @@
   <main>
     <!-- ============ HISTORY SECTION ============ -->
     <section class="card" id="history-section">
-      <h2><span class="section-icon">📊</span> History</h2>
-      <div id="heatmap-wrap">
-        <div id="heatmap" aria-label="Practice activity heatmap"></div>
-        <div class="legend">
-          Less
-          <span class="legend-cell level-0"></span>
-          <span class="legend-cell level-1"></span>
-          <span class="legend-cell level-2"></span>
-          <span class="legend-cell level-3"></span>
-          <span class="legend-cell level-4"></span>
-          More
+      <div class="progress-hero">
+        <div class="progress-chart-wrap">
+          <div class="progress-chart-header">
+            <h2 class="progress-title"><span class="section-icon">📈</span> Progress</h2>
+            <div class="axis-toggle-group" role="group" aria-label="Chart range">
+              <button class="axis-btn active" data-range="days">Days</button>
+              <button class="axis-btn" data-range="weeks">Weeks</button>
+              <button class="axis-btn" data-range="months">Months</button>
+            </div>
+          </div>
+          <canvas id="progress-chart" aria-label="Practice minutes chart"></canvas>
         </div>
+        <aside class="progress-metrics" id="progress-metrics">
+          <div class="metric-card">
+            <div class="metric-label">Avg Min / Day</div>
+            <div class="metric-value cyan" id="metric-avg-min">—</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Most Active</div>
+            <div class="metric-value" id="metric-active-time">—</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Current Streak</div>
+            <div class="metric-value lime" id="metric-streak">—</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Best Streak</div>
+            <div class="metric-value" id="metric-best-streak">—</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">This Week</div>
+            <div class="metric-value" id="stat-week">0m</div>
+          </div>
+        </aside>
       </div>
 
       <h3>Recent sessions</h3>
@@ -258,6 +279,7 @@
       </div>
       <div class="modal-body">
         <div id="all-sessions-list" class="sessions-list"></div>
+        <div class="sessions-pagination" id="all-sessions-pagination"></div>
       </div>
     </div>
   </div>
