@@ -16,7 +16,11 @@
   const TUNING_HZ = [82.41, 110.0, 146.83, 196.0, 246.94, 329.63];
   const BUFFER_SECONDS = 3.5;       // long enough to ring under a full bar at slow tempos
   const STRING_STAGGER_S = 0.012;   // 12 ms stagger → ~70 ms strum, more "human" hand
-  const STRING_GAIN = 0.16;
+  const STAGGER_JITTER_S = 0.004;   // ±2 ms random jitter per string per strum
+
+  // Per-string gain. Bass and treble strings project slightly more than the
+  // mid strings on a real acoustic. Peak sum < 1.0 keeps headroom intact.
+  const STRING_GAIN = [0.18, 0.17, 0.15, 0.15, 0.16, 0.17];
   const MASTER_GAIN = 0.7;          // per-strum bus attenuation
   const LOWPASS_HZ = 3800;
   // Per-string decay (index 0 = low E, 5 = high E). Bass strings sustain
@@ -31,6 +35,13 @@
   // Wound bass strings get full smoothing (warm); plain treble strings let
   // more high-frequency energy through (bright).
   const SEED_SMOOTH = [1.00, 0.95, 0.80, 0.65, 0.40, 0.20];
+
+  // Pick-attack impulse layered onto the seed for the first PICK_ATTACK_S.
+  // Models the pick striking the string — a short decaying click before the
+  // KS resonance takes over. Wound bass and plain treble strings get more
+  // pick "body"; mid strings less. Linear decay from full value to 0.
+  const PICK_ATTACK_S = 0.005;
+  const PICK_STRENGTH = [0.15, 0.14, 0.12, 0.12, 0.13, 0.15];
 
   class ChordAudio {
     constructor(audioCtx) {
@@ -70,12 +81,18 @@
         src.buffer = buffer;
 
         const gain = ctx.createGain();
-        gain.gain.value = STRING_GAIN;
+        gain.gain.value = STRING_GAIN[i];
         gains.push(gain);
 
         src.connect(gain).connect(filter);
-        src.start(time + i * STRING_STAGGER_S);
-        src.stop(time + i * STRING_STAGGER_S + BUFFER_SECONDS + 0.05);
+
+        // Jitter only the schedule time — buffers are shared/cached so we
+        // can't bake variation into them, but a small ±2 ms randomization
+        // at start-time keeps every strum from sounding mechanically identical.
+        const jitter = (Math.random() - 0.5) * STAGGER_JITTER_S;
+        const startTime = time + i * STRING_STAGGER_S + jitter;
+        src.start(startTime);
+        src.stop(startTime + BUFFER_SECONDS + 0.05);
         activeCount++;
 
         src.onended = () => {
@@ -118,12 +135,17 @@
       //
       // Per-string brightness: mix raw noise (bright) with the averaged
       // form (dark). smooth=1 reproduces the prior single-coefficient code.
+      // Pick attack: layer a linearly-decaying impulse on the first 5 ms.
       const smooth = SEED_SMOOTH[stringIndex];
+      const pick = PICK_STRENGTH[stringIndex];
+      const attackSamples = Math.floor(sampleRate * PICK_ATTACK_S);
       let prev = 0;
       for (let i = 0; i <= N; i++) {
         const noise = (Math.random() * 2 - 1) * 0.5;
         const averaged = 0.5 * (noise + prev);
-        data[i] = smooth * averaged + (1 - smooth) * noise;
+        const seed = smooth * averaged + (1 - smooth) * noise;
+        const impulse = i < attackSamples ? (1 - i / attackSamples) * pick : 0;
+        data[i] = seed + impulse;
         prev = noise;
       }
 
