@@ -19,7 +19,12 @@
   const STRING_GAIN = 0.16;
   const MASTER_GAIN = 0.7;          // per-strum bus attenuation
   const LOWPASS_HZ = 3800;
-  const KS_DECAY = 0.4995;          // closer to 0.5 = slower fade = longer sustain
+  // Per-string decay (index 0 = low E, 5 = high E). Bass strings sustain
+  // longer than treble on a real guitar. Each value feeds the sum-form KS
+  // loop `data[i] = decay * (data[i-N] + data[i-N-1])` where the per-loop
+  // amplitude factor is ~2*decay, so values near 0.5 give loop gains near
+  // 1.0 (long ring). Larger = slower fade.
+  const KS_DECAY = [0.49985, 0.49980, 0.49970, 0.49960, 0.49940, 0.49920];
 
   class ChordAudio {
     constructor(audioCtx) {
@@ -53,7 +58,7 @@
         const fret = frets[i];
         if (fret === null || fret === undefined) continue;
         const freq = TUNING_HZ[i] * Math.pow(2, fret / 12);
-        const buffer = this._getBuffer(freq);
+        const buffer = this._getBuffer(freq, i);
 
         const src = ctx.createBufferSource();
         src.buffer = buffer;
@@ -85,8 +90,10 @@
       }
     }
 
-    _getBuffer(freq) {
-      const key = Math.round(freq * 10);
+    _getBuffer(freq, stringIndex) {
+      // Cache key includes string index since the same pitch on different
+      // strings now uses a different decay coefficient.
+      const key = Math.round(freq * 10) + "_" + stringIndex;
       let buf = this.bufferCache.get(key);
       if (buf) return buf;
 
@@ -112,8 +119,9 @@
 
       // Karplus-Strong feedback loop. Both taps are always in-range because
       // the seed covers 0..N and the loop starts at N+1.
+      const decay = KS_DECAY[stringIndex];
       for (let i = N + 1; i < totalSamples; i++) {
-        data[i] = KS_DECAY * (data[i - N] + data[i - N - 1]);
+        data[i] = decay * (data[i - N] + data[i - N - 1]);
       }
 
       // Longer fade-out at the tail to avoid clicks if the source is cut early.
