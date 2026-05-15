@@ -4,6 +4,8 @@ A single-user local webapp for tracking guitar practice, building reusable
 practice routines, and playing along to a metronome with synthesized chord
 audio.
 
+![Guitar Practice Tracker](/Guitar%20Practice%20Tracker.png)
+
 ## Run
 
 ```
