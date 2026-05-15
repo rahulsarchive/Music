@@ -26,6 +26,12 @@
   // 1.0 (long ring). Larger = slower fade.
   const KS_DECAY = [0.49985, 0.49980, 0.49970, 0.49960, 0.49940, 0.49920];
 
+  // Per-string seed-noise smoothing. 1.0 = full FIR averaging (darkest, matches
+  // the prior single-coefficient behavior); 0.0 = raw white noise (brightest).
+  // Wound bass strings get full smoothing (warm); plain treble strings let
+  // more high-frequency energy through (bright).
+  const SEED_SMOOTH = [1.00, 0.95, 0.80, 0.65, 0.40, 0.20];
+
   class ChordAudio {
     constructor(audioCtx) {
       this.ctx = audioCtx;
@@ -109,11 +115,15 @@
       // at i=N+1, so the earliest second tap is data[0] — always in range.
       // Seeding N+1 (not just N) ensures data[N] is real noise, not a zero
       // that would punch a hole in the resonance every N samples.
+      //
+      // Per-string brightness: mix raw noise (bright) with the averaged
+      // form (dark). smooth=1 reproduces the prior single-coefficient code.
+      const smooth = SEED_SMOOTH[stringIndex];
       let prev = 0;
       for (let i = 0; i <= N; i++) {
         const noise = (Math.random() * 2 - 1) * 0.5;
-        const smoothed = 0.5 * (noise + prev);
-        data[i] = smoothed;
+        const averaged = 0.5 * (noise + prev);
+        data[i] = smooth * averaged + (1 - smooth) * noise;
         prev = noise;
       }
 
