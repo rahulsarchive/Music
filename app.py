@@ -163,10 +163,28 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_psi_session ON practice_session_item(session_id);
             """
         )
-        # Lightweight migration: add completed_at column if it's missing
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(practice_session_item)").fetchall()]
-        if "completed_at" not in cols:
+        # Migrations
+        psi_cols = [r[1] for r in conn.execute("PRAGMA table_info(practice_session_item)").fetchall()]
+        if "completed_at" not in psi_cols:
             conn.execute("ALTER TABLE practice_session_item ADD COLUMN completed_at TEXT")
+        if "ramp_start_bpm" not in psi_cols:
+            conn.execute("ALTER TABLE practice_session_item ADD COLUMN ramp_start_bpm INTEGER")
+        if "ramp_end_bpm" not in psi_cols:
+            conn.execute("ALTER TABLE practice_session_item ADD COLUMN ramp_end_bpm INTEGER")
+        if "ramp_curve" not in psi_cols:
+            conn.execute("ALTER TABLE practice_session_item ADD COLUMN ramp_curve TEXT")
+
+        sess_cols = [r[1] for r in conn.execute("PRAGMA table_info(session)").fetchall()]
+        if "accuracy" not in sess_cols:
+            conn.execute("ALTER TABLE session ADD COLUMN accuracy REAL")
+
+        ps_cols = [r[1] for r in conn.execute("PRAGMA table_info(practice_session)").fetchall()]
+        if "target_minutes" not in ps_cols:
+            conn.execute("ALTER TABLE practice_session ADD COLUMN target_minutes INTEGER")
+        if "streak_days" not in ps_cols:
+            conn.execute("ALTER TABLE practice_session ADD COLUMN streak_days INTEGER DEFAULT 0")
+        if "last_completed_at" not in ps_cols:
+            conn.execute("ALTER TABLE practice_session ADD COLUMN last_completed_at TEXT")
         conn.commit()
 
 
@@ -184,6 +202,20 @@ def _row_to_chord(row: sqlite3.Row) -> dict:
         d["total_practice_seconds"] = row["total_practice_seconds"] or 0
     if "last_bpm" in keys:
         d["last_bpm"] = row["last_bpm"]
+    if "sessions_count" in keys:
+        d["sessions_count"] = row["sessions_count"] or 0
+    if "last_practiced_at" in keys:
+        d["last_practiced_at"] = row["last_practiced_at"]
+    if "accuracy_30d" in keys:
+        d["accuracy_30d"] = row["accuracy_30d"]
+    if "bpm_trend_raw" in keys:
+        raw = row["bpm_trend_raw"]
+        if raw:
+            vals = [int(x) for x in str(raw).split(",")]
+            vals.reverse()
+            d["bpm_trend"] = vals
+        else:
+            d["bpm_trend"] = []
     return d
 
 
@@ -201,9 +233,18 @@ def list_chords():
         """
         SELECT c.*,
                COALESCE(SUM(s.duration_seconds), 0) AS total_practice_seconds,
+               COUNT(s.id) AS sessions_count,
+               MAX(s.started_at) AS last_practiced_at,
+               AVG(CASE WHEN s.started_at >= datetime('now', '-30 days')
+                        AND s.accuracy IS NOT NULL THEN s.accuracy END) AS accuracy_30d,
                (SELECT s2.bpm FROM session s2
                 WHERE s2.target_type='chord' AND s2.target_id=c.id
-                ORDER BY s2.started_at DESC LIMIT 1) AS last_bpm
+                ORDER BY s2.started_at DESC LIMIT 1) AS last_bpm,
+               (SELECT GROUP_CONCAT(bpm_val) FROM (
+                   SELECT bpm AS bpm_val FROM session s3
+                   WHERE s3.target_type='chord' AND s3.target_id=c.id
+                   ORDER BY s3.started_at DESC LIMIT 10
+               ) t) AS bpm_trend_raw
         FROM chord c
         LEFT JOIN session s ON s.target_type='chord' AND s.target_id=c.id
         GROUP BY c.id
@@ -273,7 +314,24 @@ def delete_chord(chord_id: int):
 def list_progressions():
     db = get_db()
     progs = db.execute(
-        "SELECT * FROM progression ORDER BY is_custom, name COLLATE NOCASE"
+        """
+        SELECT p.*,
+               COALESCE(SUM(s.duration_seconds), 0) AS total_practice_seconds,
+               COUNT(s.id) AS sessions_count,
+               MAX(s.started_at) AS last_practiced_at,
+               (SELECT s2.bpm FROM session s2
+                WHERE s2.target_type='progression' AND s2.target_id=p.id
+                ORDER BY s2.started_at DESC LIMIT 1) AS last_bpm,
+               (SELECT GROUP_CONCAT(bpm_val) FROM (
+                   SELECT bpm AS bpm_val FROM session s3
+                   WHERE s3.target_type='progression' AND s3.target_id=p.id
+                   ORDER BY s3.started_at DESC LIMIT 10
+               ) t) AS bpm_trend_raw
+        FROM progression p
+        LEFT JOIN session s ON s.target_type='progression' AND s.target_id=p.id
+        GROUP BY p.id
+        ORDER BY p.is_custom, p.name COLLATE NOCASE
+        """
     ).fetchall()
     result = []
     for p in progs:
@@ -286,6 +344,12 @@ def list_progressions():
             """,
             (p["id"],),
         ).fetchall()
+        raw = p["bpm_trend_raw"]
+        bpm_trend: list = []
+        if raw:
+            vals = [int(x) for x in str(raw).split(",")]
+            vals.reverse()
+            bpm_trend = vals
         result.append(
             {
                 "id": p["id"],
@@ -294,6 +358,11 @@ def list_progressions():
                 "bars_per_chord": p["bars_per_chord"],
                 "is_custom": bool(p["is_custom"]),
                 "chords": [_row_to_chord(c) for c in chord_rows],
+                "total_practice_seconds": p["total_practice_seconds"] or 0,
+                "sessions_count": p["sessions_count"] or 0,
+                "last_practiced_at": p["last_practiced_at"],
+                "last_bpm": p["last_bpm"],
+                "bpm_trend": bpm_trend,
             }
         )
     return jsonify(result)
@@ -515,6 +584,7 @@ def remove_progression_from_category(cat_id: int, prog_id: int):
 @app.route("/api/practice-sessions", methods=["GET"])
 def list_practice_sessions():
     db = get_db()
+    today_str = datetime.now(timezone.utc).date().isoformat()
     sessions = db.execute(
         "SELECT * FROM practice_session ORDER BY created_at DESC"
     ).fetchall()
@@ -531,13 +601,23 @@ def list_practice_sessions():
             WHERE psi.session_id = ?
             ORDER BY psi.position
             """,
-            (s["id"],)
+            (s["id"],),
         ).fetchall()
+        items_list = [dict(i) for i in items]
+        total_today = sum(
+            i["duration_seconds"]
+            for i in items_list
+            if i.get("completed_at") and i["completed_at"].startswith(today_str)
+        )
         result.append({
             "id": s["id"],
             "name": s["name"],
             "created_at": s["created_at"],
-            "items": [dict(i) for i in items]
+            "target_minutes": s["target_minutes"],
+            "streak_days": s["streak_days"] or 0,
+            "last_completed_at": s["last_completed_at"],
+            "total_done_seconds_today": total_today,
+            "items": items_list,
         })
     return jsonify(result)
 
@@ -567,9 +647,20 @@ def update_practice_session(session_id: int):
     db = get_db()
     if not db.execute("SELECT 1 FROM practice_session WHERE id=?", (session_id,)).fetchone():
         return jsonify({"error": "not found"}), 404
-    db.execute("UPDATE practice_session SET name=? WHERE id=?", (name, session_id))
+
+    target_minutes = data.get("target_minutes")
+    if target_minutes is not None:
+        try:
+            target_minutes = int(target_minutes)
+        except (TypeError, ValueError):
+            return jsonify({"error": "target_minutes must be an integer"}), 400
+
+    db.execute(
+        "UPDATE practice_session SET name=?, target_minutes=? WHERE id=?",
+        (name, target_minutes, session_id),
+    )
     db.commit()
-    return jsonify({"id": session_id, "name": name})
+    return jsonify({"id": session_id, "name": name, "target_minutes": target_minutes})
 
 
 @app.route("/api/practice-sessions/<int:session_id>", methods=["DELETE"])
@@ -613,13 +704,27 @@ def add_practice_session_item(session_id: int):
     if time_signature not in ("4/4", "3/4", "6/8"):
         return jsonify({"error": "invalid time_signature"}), 400
 
+    ramp_start_bpm = data.get("ramp_start_bpm")
+    ramp_end_bpm = data.get("ramp_end_bpm")
+    ramp_curve = data.get("ramp_curve")
+    if ramp_start_bpm is not None:
+        try:
+            ramp_start_bpm = int(ramp_start_bpm)
+            ramp_end_bpm = int(ramp_end_bpm) if ramp_end_bpm is not None else ramp_start_bpm
+        except (TypeError, ValueError):
+            return jsonify({"error": "ramp bpm values must be integers"}), 400
+    if ramp_curve is not None and ramp_curve not in ("linear", "step"):
+        return jsonify({"error": "ramp_curve must be 'linear' or 'step'"}), 400
+
     cur = db.execute(
         """
         INSERT INTO practice_session_item
-            (session_id, position, target_type, target_id, duration_seconds, bpm, time_signature, bars_per_chord)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (session_id, position, target_type, target_id, duration_seconds, bpm,
+             time_signature, bars_per_chord, ramp_start_bpm, ramp_end_bpm, ramp_curve)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (session_id, position, target_type, int(target_id), duration_seconds, bpm, time_signature, bars_per_chord)
+        (session_id, position, target_type, int(target_id), duration_seconds, bpm,
+         time_signature, bars_per_chord, ramp_start_bpm, ramp_end_bpm, ramp_curve),
     )
     db.commit()
 
@@ -784,13 +889,22 @@ def create_session():
     if data["target_type"] not in ("chord", "progression"):
         return jsonify({"error": "target_type must be 'chord' or 'progression'"}), 400
 
+    accuracy = None
+    if data.get("accuracy") is not None:
+        try:
+            accuracy = float(data["accuracy"])
+            if not (0.0 <= accuracy <= 1.0):
+                return jsonify({"error": "accuracy must be between 0.0 and 1.0"}), 400
+        except (TypeError, ValueError):
+            return jsonify({"error": "accuracy must be a number"}), 400
+
     db = get_db()
     cur = db.execute(
         """
         INSERT INTO session
             (started_at, ended_at, duration_seconds, bpm, time_signature,
-             bars_per_chord, target_type, target_id, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             bars_per_chord, target_type, target_id, notes, accuracy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             data["started_at"],
@@ -802,6 +916,7 @@ def create_session():
             data["target_type"],
             int(data["target_id"]),
             data.get("notes") or None,
+            accuracy,
         ),
     )
     db.commit()
@@ -833,7 +948,8 @@ def progress_stats():
     today = datetime.now(timezone.utc).date()
 
     if range_type == "days":
-        periods = [(today - timedelta(days=i)) for i in range(9, -1, -1)]
+        count = min(int(request.args.get("count", 14)), 90)
+        periods = [(today - timedelta(days=i)) for i in range(count - 1, -1, -1)]
         rows = db.execute(
             """
             SELECT date(started_at) AS d, SUM(duration_seconds) AS total_seconds
@@ -955,6 +1071,188 @@ def summary():
         "longest_streak": longest,
         "avg_min_per_day": avg_min_per_day,
         "most_active_hour": most_active_hour,
+    })
+
+
+@app.route("/api/chords/<int:chord_id>/trend", methods=["GET"])
+def chord_trend(chord_id: int):
+    limit = min(int(request.args.get("limit", 10)), 100)
+    db = get_db()
+    if not db.execute("SELECT 1 FROM chord WHERE id=?", (chord_id,)).fetchone():
+        return jsonify({"error": "not found"}), 404
+    rows = db.execute(
+        """
+        SELECT bpm, accuracy FROM session
+        WHERE target_type='chord' AND target_id=?
+        ORDER BY started_at DESC LIMIT ?
+        """,
+        (chord_id, limit),
+    ).fetchall()
+    rows = list(reversed(rows))
+    return jsonify({
+        "bpm": [r["bpm"] for r in rows],
+        "accuracy": [r["accuracy"] for r in rows],
+    })
+
+
+@app.route("/api/plan/today", methods=["GET"])
+def plan_today():
+    db = get_db()
+    today = datetime.now(timezone.utc).date()
+    cutoff_30d = (today - timedelta(days=30)).isoformat()
+    cutoff_7d = (today - timedelta(days=7)).isoformat()
+
+    rows = db.execute(
+        """
+        SELECT c.id, c.display_name,
+               COALESCE(SUM(s.duration_seconds), 0) AS total_practice_seconds,
+               MAX(s.started_at) AS last_practiced_at,
+               AVG(CASE WHEN s.started_at >= ? AND s.accuracy IS NOT NULL
+                        THEN s.accuracy END) AS accuracy_30d,
+               (SELECT s2.bpm FROM session s2
+                WHERE s2.target_type='chord' AND s2.target_id=c.id
+                ORDER BY s2.started_at DESC LIMIT 1) AS last_bpm,
+               (SELECT s3.bpm FROM session s3
+                WHERE s3.target_type='chord' AND s3.target_id=c.id
+                  AND s3.started_at <= ?
+                ORDER BY s3.started_at DESC LIMIT 1) AS bpm_7d_ago
+        FROM chord c
+        LEFT JOIN session s ON s.target_type='chord' AND s.target_id=c.id
+        GROUP BY c.id
+        """,
+        (cutoff_30d, cutoff_7d),
+    ).fetchall()
+
+    if not rows:
+        return jsonify([])
+
+    chords_scored = []
+    for r in rows:
+        last = r["last_practiced_at"]
+        if last:
+            try:
+                last_date = datetime.fromisoformat(last.replace("Z", "+00:00")).date()
+                days_since = (today - last_date).days
+            except (ValueError, AttributeError):
+                days_since = 999
+        else:
+            days_since = 999
+        accuracy = r["accuracy_30d"] if r["accuracy_30d"] is not None else 0.75
+        current_bpm = r["last_bpm"] or 0
+        old_bpm = r["bpm_7d_ago"] or 0
+        bpm_plateau = bool(current_bpm and current_bpm == old_bpm)
+        score = days_since * 2 + (1 - accuracy) * 50 + (10 if bpm_plateau else 0)
+        chords_scored.append({
+            "id": r["id"],
+            "display_name": r["display_name"],
+            "score": score,
+            "accuracy": accuracy,
+            "days_since": days_since,
+            "bpm_plateau": bpm_plateau,
+        })
+
+    chords_scored.sort(key=lambda x: -x["score"])
+    by_accuracy = sorted(chords_scored, key=lambda x: x["accuracy"])
+    by_days = sorted(chords_scored, key=lambda x: -x["days_since"])
+
+    seen: set = set()
+    items = []
+
+    for chord, urgency, reason in [
+        (by_accuracy[0], "high", "Lowest accuracy · last 30d"),
+        (by_days[0], "high",
+         f"Not practiced in {by_days[0]['days_since']}d"
+         if by_days[0]["days_since"] < 999 else "Never practiced"),
+    ]:
+        if chord["id"] not in seen:
+            seen.add(chord["id"])
+            items.append({
+                "kind": "chord",
+                "target_id": chord["id"],
+                "target_name": chord["display_name"],
+                "reason": reason,
+                "urgency": urgency,
+                "goal_min": 3,
+            })
+
+    for chord in chords_scored:
+        if chord["bpm_plateau"] and chord["id"] not in seen and len(items) < 4:
+            seen.add(chord["id"])
+            items.append({
+                "kind": "chord",
+                "target_id": chord["id"],
+                "target_name": chord["display_name"],
+                "reason": "BPM plateau · no progress in 7d",
+                "urgency": "med",
+                "goal_min": 3,
+            })
+
+    for chord in chords_scored:
+        if len(items) >= 3:
+            break
+        if chord["id"] not in seen:
+            seen.add(chord["id"])
+            items.append({
+                "kind": "chord",
+                "target_id": chord["id"],
+                "target_name": chord["display_name"],
+                "reason": "Needs attention",
+                "urgency": "med",
+                "goal_min": 3,
+            })
+
+    # 1 progression suggestion — prefer one containing a high-urgency chord
+    prog_row = None
+    if seen:
+        prog_row = db.execute(
+            "SELECT p.id, p.name FROM progression p "
+            "JOIN progression_chord pc ON pc.progression_id = p.id "
+            "WHERE pc.chord_id IN ({}) ORDER BY RANDOM() LIMIT 1".format(
+                ",".join("?" * len(seen))
+            ),
+            list(seen),
+        ).fetchone()
+    if not prog_row:
+        prog_row = db.execute(
+            "SELECT id, name FROM progression ORDER BY RANDOM() LIMIT 1"
+        ).fetchone()
+    if prog_row:
+        items.append({
+            "kind": "progression",
+            "target_id": prog_row["id"],
+            "target_name": prog_row["name"],
+            "reason": "Suggested progression",
+            "urgency": "low",
+            "goal_min": 4,
+        })
+
+    return jsonify(items)
+
+
+@app.route("/api/search", methods=["GET"])
+def search():
+    q = (request.args.get("q") or "").strip()
+    if not q:
+        return jsonify({"chords": [], "progressions": [], "routines": []})
+    pattern = f"%{q}%"
+    db = get_db()
+    chords = db.execute(
+        "SELECT id, name, display_name FROM chord "
+        "WHERE display_name LIKE ? OR name LIKE ? LIMIT 10",
+        (pattern, pattern),
+    ).fetchall()
+    progressions = db.execute(
+        "SELECT id, name FROM progression WHERE name LIKE ? LIMIT 10",
+        (pattern,),
+    ).fetchall()
+    routines = db.execute(
+        "SELECT id, name FROM practice_session WHERE name LIKE ? LIMIT 10",
+        (pattern,),
+    ).fetchall()
+    return jsonify({
+        "chords": [dict(r) for r in chords],
+        "progressions": [dict(r) for r in progressions],
+        "routines": [dict(r) for r in routines],
     })
 
 

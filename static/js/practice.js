@@ -378,38 +378,7 @@
       }
 
       for (const c of visibleChords) {
-        const card = document.createElement("div");
-        card.className = "chord-card";
-        card.dataset.chordId = String(c.id);
-
-        const statsHtml = this._buildChordStatsHtml(c);
-        card.innerHTML = `
-          <div class="name"></div>
-          <svg class="mini" viewBox="0 0 140 170"></svg>
-          ${statsHtml}
-        `;
-        card.querySelector(".name").textContent = c.display_name;
-        const svg = card.querySelector("svg");
-        window.ChordDiagram.renderChord(svg, c.frets, c.fingers, { showFingers: false });
-        card.addEventListener("click", () => this._selectChord(c, card));
-
-        const del = document.createElement("button");
-        del.className = "delete-btn";
-        del.textContent = "×";
-        del.title = "Delete chord";
-        del.addEventListener("click", async (e) => {
-          e.stopPropagation();
-          if (!confirm(`Delete chord "${c.display_name}"?`)) return;
-          const res = await fetch(`/api/chords/${c.id}`, { method: "DELETE" });
-          if (res.ok) {
-            await this.loadData();
-          } else {
-            const err = await res.json().catch(() => ({}));
-            alert("Delete failed: " + (err.error || res.status));
-          }
-        });
-        card.appendChild(del);
-        grid.appendChild(card);
+        grid.appendChild(this._buildChordCard(c));
       }
 
       const add = document.createElement("div");
@@ -417,6 +386,100 @@
       add.innerHTML = `<div class="plus">+</div><div>Add custom</div>`;
       add.addEventListener("click", () => window.__openChordBuilder());
       grid.appendChild(add);
+
+      this._updateLibraryStats(visibleChords);
+    }
+
+    _buildChordCard(c) {
+      const card = document.createElement("div");
+      card.className = "chord-card";
+      card.dataset.chordId = String(c.id);
+      const tag = this._chordTag(c);
+      const accuracy = window.Dashboard ? window.Dashboard.mockChordAccuracy(c) : 0;
+      const trend = window.Dashboard ? window.Dashboard.mockChordTrend(c) : [];
+      const delta = trend.length ? trend[trend.length - 1] - trend[0] : 0;
+      const secs = c.total_practice_seconds || 0;
+      const timeStr = secs >= 60 ? window.Widgets.fmtDuration(secs) : (secs > 0 ? `${secs}s` : "0m");
+      const plays = c.sessions_count != null ? c.sessions_count : (secs > 0 ? Math.max(1, Math.round(secs / 120)) : 0);
+      const accClass = accuracy > 0.9 ? "pos" : accuracy < 0.75 ? "low" : "";
+      const accVal = secs > 0 ? Math.round(accuracy * 100) : "—";
+      const lastBpm = c.last_bpm ? c.last_bpm : "—";
+
+      card.innerHTML = `
+        <div class="cc-head">
+          <div>
+            <div class="cc-name"></div>
+            <span class="cc-tag"></span>
+          </div>
+          <div class="cc-acc">
+            <div class="cc-acc-val ${accClass}">${accVal}</div>
+            <div class="st-cap-sm cc-acc-label">acc.</div>
+          </div>
+        </div>
+        <div class="cc-diagram"><svg class="mini" viewBox="0 0 140 170"></svg></div>
+        <div class="cc-trend">
+          <div class="row">
+            <span class="st-cap-sm">BPM TREND · 10 LAST</span>
+            <span class="delta ${delta < 0 ? "neg" : ""}">${delta >= 0 ? "+" : ""}${delta}</span>
+          </div>
+          <div class="cc-spark-host"></div>
+        </div>
+        <div class="cc-stats">
+          <div class="cc-stat"><div class="v st-mono">${timeStr}</div><div class="l">total</div></div>
+          <div class="cc-stat"><div class="v st-mono">${lastBpm}</div><div class="l">bpm</div></div>
+          <div class="cc-stat"><div class="v st-mono">${plays}</div><div class="l">plays</div></div>
+        </div>
+      `;
+      card.querySelector(".cc-name").textContent = c.display_name;
+      card.querySelector(".cc-tag").textContent = tag;
+      const svg = card.querySelector("svg.mini");
+      window.ChordDiagram.renderChord(svg, c.frets, c.fingers, { showFingers: true, accent: true });
+      if (trend.length && window.Widgets) {
+        window.Widgets.sparkline(card.querySelector(".cc-spark-host"), trend, { stroke: "var(--accent)", w: 220, h: 22 });
+      }
+      card.addEventListener("click", () => this._selectChord(c, card));
+
+      const del = document.createElement("button");
+      del.className = "delete-btn";
+      del.textContent = "×";
+      del.title = "Delete chord";
+      del.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!confirm(`Delete chord "${c.display_name}"?`)) return;
+        const res = await fetch(`/api/chords/${c.id}`, { method: "DELETE" });
+        if (res.ok) { await this.loadData(); }
+        else { const err = await res.json().catch(() => ({})); alert("Delete failed: " + (err.error || res.status)); }
+      });
+      card.appendChild(del);
+      return card;
+    }
+
+    _chordTag(c) {
+      const name = (c.display_name || "").toLowerCase();
+      if (name.includes("maj7")) return "maj7";
+      if (name.includes("sus")) return "sus";
+      if (name.includes("add")) return "color";
+      if (name.includes("m7")) return "min7";
+      if (/[a-g]m\b/.test(name)) return "minor";
+      if (name.includes("7")) return "7th";
+      const frets = (c.frets || []).filter((f) => f != null && f > 0);
+      if (frets.length && Math.min(...frets) >= 1 && (c.frets || []).every((f) => f !== 0 && f !== -1)) return "barre";
+      if (frets.some((f) => f > 4)) return "barre";
+      return "open";
+    }
+
+    _updateLibraryStats(chords) {
+      const totalSec = (this.chords || []).reduce((s, c) => s + (c.total_practice_seconds || 0), 0);
+      const accs = (this.chords || [])
+        .filter((c) => (c.total_practice_seconds || 0) > 0)
+        .map((c) => window.Dashboard ? window.Dashboard.mockChordAccuracy(c) : 0);
+      const avgAcc = accs.length ? (accs.reduce((a, b) => a + b, 0) / accs.length) : 0;
+      const countEl = document.getElementById("library-count");
+      const timeEl = document.getElementById("library-total-time");
+      const accEl = document.getElementById("library-avg-accuracy");
+      if (countEl) countEl.textContent = `·  ${this.chords.length}`;
+      if (timeEl && window.Widgets) timeEl.textContent = window.Widgets.fmtDuration(totalSec);
+      if (accEl) accEl.textContent = accs.length ? `${Math.round(avgAcc * 100)}%` : "—";
     }
 
     _buildChordStatsHtml(c) {
@@ -450,10 +513,31 @@
         const card = document.createElement("div");
         card.className = "prog-card";
         card.dataset.progId = String(p.id);
-        const chordsHtml = p.chords.map((c) => `<span class="pchip">${escapeHtml(c.display_name)}</span>`).join("");
-        card.innerHTML = `<div class="name"></div><div class="prog-meta"></div><div class="progression-chords">${chordsHtml}</div>`;
+        const chordsHtml = p.chords.slice(0, 12).map((c) => `<span class="pchip">${escapeHtml(c.display_name)}</span>`).join("");
+        const more = p.chords.length > 12 ? `<span class="pchip" style="background:transparent;border:none;color:var(--ink-3);">+${p.chords.length - 12}</span>` : "";
+        const progSecs = p.total_practice_seconds || 0;
+        const progTimeStr = progSecs >= 60 ? window.Widgets.fmtDuration(progSecs) : (progSecs > 0 ? `${progSecs}s` : "—");
+        const progLastBpm = p.last_bpm || "—";
+        const progPlays = p.sessions_count || "—";
+        const trend = (p.bpm_trend && p.bpm_trend.length) ? p.bpm_trend : [2, 3, 2, 4, 3, 5, 4, 5, 6, 5];
+        card.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+              <div class="name"></div>
+              <div class="prog-meta"></div>
+            </div>
+          </div>
+          <div class="progression-chords">${chordsHtml}${more}</div>
+          <div class="pc-stats">
+            <div class="pc-stat"><div class="v">${progTimeStr}</div><div class="l">total</div></div>
+            <div class="pc-stat"><div class="v">${progLastBpm}</div><div class="l">last bpm</div></div>
+            <div class="pc-stat"><div class="v">${progPlays}</div><div class="l">plays</div></div>
+            <div class="pc-spark"></div>
+          </div>
+        `;
         card.querySelector(".name").textContent = p.name;
-        card.querySelector(".prog-meta").textContent = `${p.time_signature} · ${p.bars_per_chord} bar${p.bars_per_chord === 1 ? "" : "s"}/chord`;
+        card.querySelector(".prog-meta").textContent = `${p.time_signature} · ${p.bars_per_chord} bar${p.bars_per_chord === 1 ? "" : "s"}/chord · ${p.chords.length} chords`;
+        if (window.Widgets) window.Widgets.sparkline(card.querySelector(".pc-spark"), trend, { stroke: "var(--accent)", w: 60, h: 22 });
         card.addEventListener("click", () => this._selectProgression(p, card));
 
         const del = document.createElement("button");
@@ -533,10 +617,11 @@
         window.ChordDiagram.renderChord(this.elNextSvg, nextC.frets, nextC.fingers, { showFingers: false });
         this.elNextWrap.classList.remove("hidden");
       }
-      if (flash) {
-        this.elCurName.style.animation = "none";
-        void this.elCurName.offsetWidth;
-        this.elCurName.style.animation = "chord-flash 0.4s ease";
+      if (flash && window.Widgets) {
+        // Slide-in chord change animation
+        const cur = document.querySelector(".current-wrap");
+        const nxt = document.querySelector(".next-wrap");
+        window.Widgets.chordChangeAnimate(cur, nxt);
       }
     }
 
@@ -613,7 +698,8 @@
         startedAtIso: new Date().toISOString(),
       };
       this.elPlayBtn.textContent = "Stop";
-      this.elPlayBtn.classList.add("playing");
+      this.elPlayBtn.classList.add("playing", "is-stop");
+      document.body.classList.add("is-playing");
       this.metronome.start();
       this._tickTimer();
       this.timerId = setInterval(() => this._tickTimer(), 250);
@@ -628,7 +714,8 @@
       const endedMs = Date.now();
       const durationSec = Math.max(1, Math.round((endedMs - this.session.startedAtMs) / 1000));
       this.elPlayBtn.textContent = "Start";
-      this.elPlayBtn.classList.remove("playing");
+      this.elPlayBtn.classList.remove("playing", "is-stop");
+      document.body.classList.remove("is-playing");
 
       const payload = {
         started_at: this.session.startedAtIso,

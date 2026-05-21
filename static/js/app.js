@@ -1,4 +1,4 @@
-/* Boot: wire modules together. */
+/* String Time — boot. Wires modules together. */
 (function () {
   document.addEventListener("DOMContentLoaded", async () => {
     const practice = new window.Practice();
@@ -21,6 +21,7 @@
       onSave: async () => {
         await practice.loadData();
         sessionBuilder.setData(practice.chords, practice.progressions);
+        if (window.Dashboard) await window.Dashboard.refresh(practice);
       },
     });
     window.__openChordBuilder = () => builder.show();
@@ -39,6 +40,7 @@
       onSave: async () => {
         await practice.loadData();
         sessionBuilder.setData(practice.chords, practice.progressions);
+        if (window.Dashboard) await window.Dashboard.refresh(practice);
       },
     });
     window.__openProgressionBuilder = () => progBuilder.show();
@@ -46,10 +48,14 @@
     const sessionBuilder = new window.PracticeSessionBuilder();
 
     window.History.init();
+    if (window.Dashboard) window.Dashboard.init();
+
     await Promise.all([
       practice.loadData(),
       window.History.refresh(),
     ]);
+
+    if (window.Dashboard) await window.Dashboard.refresh(practice);
 
     sessionBuilder.setData(practice.chords, practice.progressions);
     await sessionBuilder.load();
