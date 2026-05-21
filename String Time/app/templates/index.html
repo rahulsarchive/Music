@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>String Time</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+</head>
+<body>
+  <!-- =============== APP BAR =============== -->
+  <header class="app-bar">
+    <div class="brand">
+      <div class="brand-mark">§</div>
+      <div class="brand-name">String<span class="accent"> Time</span></div>
+    </div>
+    <nav class="app-nav">
+      <a class="active" data-view="dashboard">Today</a>
+      <a data-view="library">Library</a>
+      <a data-view="routines">Routines</a>
+    </nav>
+    <div class="app-search">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input type="text" placeholder="Search chords, progressions…" disabled />
+      <span class="kbd">⌘K</span>
+    </div>
+    <div class="streak-chip" title="Current practice streak">
+      <svg width="11" height="11" viewBox="0 0 24 24"><path d="M12 2c1 3 4 5 4 9a4 4 0 1 1-8 0c0-1 .5-2 1-3-.5 4 3 4 3 7-2 0-3-2-3-4 0-3 3-5 3-9z"/></svg>
+      <span id="stat-streak">—</span> day streak
+    </div>
+    <div class="app-avatar">RK</div>
+  </header>
+
+  <main>
+    <!-- =============== DASHBOARD =============== -->
+    <section id="view-dashboard">
+      <div class="page-header">
+        <div>
+          <div class="st-cap" id="today-date">—</div>
+          <h1>Today</h1>
+          <div class="subline" id="today-subline">Pick something to practice.</div>
+        </div>
+        <div class="actions">
+          <button class="btn" id="quick-log-btn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Quick log
+          </button>
+          <button class="btn btn-primary" id="resume-routine-btn">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+            Resume routine
+          </button>
+        </div>
+      </div>
+
+      <!-- KPI row -->
+      <div class="kpi-row" id="kpi-row">
+        <div class="kpi" id="kpi-today">
+          <div class="kpi-head"><span class="kpi-label">Today</span><span class="kpi-sub">goal 25m</span></div>
+          <div class="kpi-val"><span class="num">—</span><span class="unit">min</span></div>
+          <div class="kpi-spark"></div>
+        </div>
+        <div class="kpi" id="kpi-streak">
+          <div class="kpi-head"><span class="kpi-label">Streak</span><span class="kpi-sub"></span></div>
+          <div class="kpi-val"><span class="num">—</span><span class="unit">days</span></div>
+          <div class="kpi-spark"></div>
+        </div>
+        <div class="kpi" id="kpi-week">
+          <div class="kpi-head"><span class="kpi-label">This week</span><span class="kpi-sub"></span></div>
+          <div class="kpi-val"><span class="num">—</span></div>
+          <div class="kpi-spark"></div>
+        </div>
+        <div class="kpi" id="kpi-avg">
+          <div class="kpi-head"><span class="kpi-label">Avg / day</span><span class="kpi-sub">30d</span></div>
+          <div class="kpi-val"><span class="num">—</span><span class="unit">min</span></div>
+          <div class="kpi-spark"></div>
+        </div>
+        <div class="kpi" id="kpi-peak">
+          <div class="kpi-head"><span class="kpi-label">Peak hour</span><span class="kpi-sub"></span></div>
+          <div class="kpi-val"><span class="num">—</span></div>
+          <div class="kpi-spark"></div>
+        </div>
+      </div>
+
+      <!-- Heatmap + Today's plan -->
+      <div style="display: grid; grid-template-columns: 2fr 1.05fr; gap: 12px; margin-bottom: 14px;">
+        <div class="card heatmap-card">
+          <div class="card-header">
+            <div>
+              <div class="st-cap-sm">Activity · last 12 months</div>
+              <div class="meta" style="margin-top: 4px;">
+                <span class="big st-mono" id="heatmap-total-sessions">—</span> sessions
+                <span style="color: var(--ink-3); margin-left: 12px;">·</span>
+                <span class="big st-mono" id="heatmap-total-time" style="margin-left: 12px;">—</span>
+              </div>
+            </div>
+            <div class="axis-toggle" role="group" aria-label="Chart range">
+              <button class="axis-btn active" data-range="days">Days</button>
+              <button class="axis-btn" data-range="weeks">Weeks</button>
+              <button class="axis-btn" data-range="months">Months</button>
+            </div>
+          </div>
+          <div id="heatmap-container">
+            <svg id="heatmap-year" class="heatmap-svg"></svg>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="st-cap-sm">Today's plan</div>
+            <span class="kpi-sub" id="plan-summary">—</span>
+          </div>
+          <div id="today-plan" style="display: flex; flex-direction: column; gap: 8px;"></div>
+          <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
+            <button class="btn btn-sm btn-primary" id="start-plan-btn">Start plan →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent sessions + Fretboard density + 14d chart -->
+      <div style="display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 12px;">
+        <div class="card">
+          <div class="card-header">
+            <div class="st-cap-sm">Recent sessions</div>
+            <a class="btn btn-sm btn-ghost" id="all-sessions-btn">View all →</a>
+          </div>
+          <div id="sessions-list" class="sessions-list">
+            <div class="empty">No sessions yet — pick a chord below and hit start.</div>
+          </div>
+          <div id="sessions-footer" class="sessions-footer hidden"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="st-cap-sm">Fretboard density</div>
+            <span class="kpi-sub" id="fretboard-meta">—</span>
+          </div>
+          <svg id="fretboard-heatmap" class="fretboard-svg" viewBox="0 0 360 90"></svg>
+          <div style="display: flex; justify-content: space-between; margin-top: 8px; font-family: var(--font-mono); font-size: 10px; color: var(--ink-4);">
+            <span id="fretboard-hot">Hot: —</span>
+            <span id="fretboard-cold">Cold: —</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="st-cap-sm">Last 14 days</div>
+            <span class="kpi-sub" id="recent-peak">—</span>
+          </div>
+          <canvas id="progress-chart" aria-label="Practice minutes chart" style="width: 100%; height: 110px;"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- =============== LIBRARY =============== -->
+    <section id="view-library" class="hidden">
+      <div class="page-header">
+        <div>
+          <div class="st-cap">Library</div>
+          <h1>Chords <span style="color: var(--ink-3); font-weight: 300; font-family: var(--font-mono); font-size: 18px;" id="library-count">·  —</span></h1>
+        </div>
+        <div style="display: flex; gap: 18px; align-items: center;">
+          <div style="display: flex; gap: 16px; font-size: 12px; color: var(--ink-3);">
+            <span><span class="st-mono" style="color: var(--ink);" id="library-total-time">—</span> total drilled</span>
+            <span><span class="st-mono" style="color: var(--ink);" id="library-avg-accuracy">—</span> avg accuracy</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="picker">
+        <div class="tabs">
+          <button class="tab active" data-tab="chord">Chords</button>
+          <button class="tab" data-tab="progression">Progressions</button>
+        </div>
+
+        <!-- Chord tab -->
+        <div id="chord-tab-content">
+          <div class="category-bar" id="chord-category-bar">
+            <button class="cat-pill active" data-cat-id="all">All</button>
+            <button class="cat-add-btn" id="chord-cat-add-btn" title="New category">+ Category</button>
+          </div>
+          <div class="category-actions hidden" id="chord-cat-actions">
+            <span class="cat-actions-label" id="chord-cat-actions-label"></span>
+            <button class="btn btn-sm" id="chord-cat-add-chords-btn">+ Add chords</button>
+            <button class="btn btn-sm btn-danger" id="chord-cat-delete-btn">Delete category</button>
+          </div>
+          <div id="chord-grid" class="grid"></div>
+        </div>
+
+        <!-- Progression tab -->
+        <div id="progression-tab-content" class="hidden">
+          <div class="category-bar" id="prog-category-bar">
+            <button class="cat-pill active" data-cat-id="all">All</button>
+            <button class="cat-add-btn" id="prog-cat-add-btn" title="New category">+ Category</button>
+          </div>
+          <div class="category-actions hidden" id="prog-cat-actions">
+            <span class="cat-actions-label" id="prog-cat-actions-label"></span>
+            <button class="btn btn-sm" id="prog-cat-add-progs-btn">+ Add progressions</button>
+            <button class="btn btn-sm btn-danger" id="prog-cat-delete-btn">Delete category</button>
+          </div>
+          <div id="progression-grid" class="grid"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =============== ROUTINES =============== -->
+    <section id="view-routines" class="hidden">
+      <div class="page-header">
+        <div>
+          <div class="st-cap">Sessions / Routines</div>
+          <h1>Routines</h1>
+        </div>
+      </div>
+      <!-- Practice Session Builder tab is now its own section -->
+      <div id="practice-builder-tab" class="practice-builder">
+        <div class="pb-layout">
+          <div class="pb-sessions-panel">
+            <div class="pb-panel-header">
+              <span class="pb-panel-title">Routines</span>
+              <button class="btn btn-sm btn-primary" id="pb-new-session-btn">+ New</button>
+            </div>
+            <div id="pb-sessions-list" class="pb-sessions-list">
+              <div class="empty">No routines yet.</div>
+            </div>
+          </div>
+          <div class="pb-items-panel">
+            <div id="pb-placeholder" class="pb-placeholder">
+              <div class="pb-placeholder-icon">▦</div>
+              <div>Select a routine to view its items</div>
+            </div>
+            <div id="pb-items-content" class="hidden">
+              <div class="pb-panel-header">
+                <span class="pb-panel-title" id="pb-selected-session-name">Routine</span>
+                <button class="btn btn-sm" id="pb-add-item-btn">+ Add item</button>
+              </div>
+              <div id="pb-items-list" class="pb-items-list">
+                <div class="empty">No items yet — add something to practice.</div>
+              </div>
+              <div class="pb-footer">
+                <span class="tempo-ramp">
+                  <span class="st-cap-sm">Tempo ramp</span>
+                  <span class="switch" id="tempo-ramp-switch"></span>
+                  <span class="st-mono" id="tempo-ramp-range" style="color: var(--ink-2);">70 → 110 bpm</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- =============== STICKY PLAY BAR =============== -->
+  <div id="play-bar" class="play-bar">
+    <div class="row controls">
+      <div class="control">
+        <label for="bpm">BPM</label>
+        <div class="field">
+          <input type="range" id="bpm-slider" min="40" max="240" value="80" />
+          <input type="number" id="bpm" min="40" max="240" value="80" />
+        </div>
+      </div>
+      <div class="control">
+        <label for="time-sig">Time</label>
+        <div class="field">
+          <select id="time-sig">
+            <option value="4/4">4/4</option>
+            <option value="3/4">3/4</option>
+            <option value="6/8">6/8</option>
+          </select>
+        </div>
+      </div>
+      <div class="control hidden" id="bars-per-chord-wrap">
+        <label for="bars-per-chord">Bars / chord</label>
+        <div class="field">
+          <select id="bars-per-chord">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="4">4</option>
+          </select>
+        </div>
+      </div>
+      <div class="control">
+        <label>Sound</label>
+        <div class="audio-mode-group" role="group" aria-label="Metronome sound mode">
+          <button class="audio-mode-btn" data-mode="tick" type="button">Tick</button>
+          <button class="audio-mode-btn" data-mode="chord" type="button">Chord</button>
+          <button class="audio-mode-btn active" data-mode="both" type="button">Both <span class="wf" id="wf-both"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <div class="bar-display">
+      <svg id="bar-svg" viewBox="0 0 1000 70" preserveAspectRatio="none"></svg>
+    </div>
+
+    <div class="play-area">
+      <div class="now-playing">
+        <div class="current-wrap">
+          <div style="display: flex; flex-direction: column; align-items: flex-start;">
+            <div class="now-label">Now</div>
+            <div id="current-chord-name" class="current-name">—</div>
+          </div>
+          <svg id="current-chord-svg" class="chord-large" viewBox="0 0 140 170"></svg>
+        </div>
+        <div class="next-wrap" id="next-wrap">
+          <div style="display: flex; flex-direction: column; align-items: flex-start;">
+            <div class="now-label">Next</div>
+            <div id="next-chord-name" class="next-name">—</div>
+          </div>
+          <svg id="next-chord-svg" class="chord-small" viewBox="0 0 140 170"></svg>
+        </div>
+      </div>
+
+      <div class="play-controls">
+        <button id="play-btn" class="play-btn" disabled>Start</button>
+        <div class="timer" id="timer">00:00</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =============== MODALS (preserved) =============== -->
+
+  <!-- Custom chord -->
+  <div id="chord-builder-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Add custom chord</h3>
+        <button class="modal-close" id="chord-builder-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="builder-row">
+          <svg id="builder-svg" viewBox="0 0 220 260"></svg>
+          <div class="builder-side">
+            <label for="builder-name">Name</label>
+            <input type="text" id="builder-name" placeholder="e.g. Csus4" maxlength="32" />
+            <label for="builder-text">Notation (low E → high E)</label>
+            <input type="text" id="builder-text" placeholder="x 3 3 0 1 1" />
+            <p class="hint">Use 0 for open, x for muted, or a fret number 1–24. Separate by spaces or commas.</p>
+            <p class="hint">Tip: click a string above its nut to toggle open / muted. Click on a fret to set its position.</p>
+            <div class="builder-actions">
+              <button class="btn" id="builder-clear">Clear</button>
+              <button class="btn btn-primary" id="builder-save">Save chord</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Progression builder -->
+  <div id="progression-builder-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content prog-builder">
+      <div class="modal-header">
+        <h3>Build progression</h3>
+        <button class="modal-close" id="prog-builder-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="prog-builder-row">
+          <div class="prog-builder-col">
+            <label for="prog-builder-search">Available chords</label>
+            <input type="text" id="prog-builder-search" placeholder="Search…" />
+            <div id="prog-builder-palette" class="prog-palette"></div>
+          </div>
+          <div class="prog-builder-col">
+            <label>Progression (drag to reorder)</label>
+            <div id="prog-builder-sequence" class="prog-sequence"></div>
+          </div>
+        </div>
+        <div class="prog-builder-meta">
+          <div class="control">
+            <label for="prog-builder-name">Name</label>
+            <input type="text" id="prog-builder-name" placeholder="e.g. My I-IV-V" maxlength="80" />
+          </div>
+          <div class="control">
+            <label for="prog-builder-ts">Time</label>
+            <select id="prog-builder-ts">
+              <option value="4/4">4/4</option>
+              <option value="3/4">3/4</option>
+              <option value="6/8">6/8</option>
+            </select>
+          </div>
+          <div class="control">
+            <label for="prog-builder-bpc">Bars / chord</label>
+            <select id="prog-builder-bpc">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="4">4</option>
+            </select>
+          </div>
+        </div>
+        <div class="builder-actions">
+          <button class="btn" id="prog-builder-cancel">Cancel</button>
+          <button class="btn btn-primary" id="prog-builder-save">Save progression</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- All sessions -->
+  <div id="all-sessions-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content all-sessions-modal">
+      <div class="modal-header">
+        <h3>All sessions</h3>
+        <button class="modal-close" id="all-sessions-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="all-sessions-list" class="sessions-list"></div>
+        <div class="sessions-pagination" id="all-sessions-pagination"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chord category picker -->
+  <div id="chord-cat-picker-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content cat-picker-modal">
+      <div class="modal-header">
+        <h3 id="chord-cat-picker-title">Add chords to category</h3>
+        <button class="modal-close" id="chord-cat-picker-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint">Click chords to toggle them in or out of this category.</p>
+        <div id="chord-cat-picker-grid" class="cat-picker-grid"></div>
+        <div class="builder-actions">
+          <button class="btn btn-primary" id="chord-cat-picker-done">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Progression category picker -->
+  <div id="prog-cat-picker-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content cat-picker-modal">
+      <div class="modal-header">
+        <h3 id="prog-cat-picker-title">Add progressions to category</h3>
+        <button class="modal-close" id="prog-cat-picker-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint">Click progressions to toggle them in or out of this category.</p>
+        <div id="prog-cat-picker-list" class="cat-picker-list"></div>
+        <div class="builder-actions">
+          <button class="btn btn-primary" id="prog-cat-picker-done">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Practice session add item -->
+  <div id="pb-add-item-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content pb-item-modal">
+      <div class="modal-header">
+        <h3>Add practice item</h3>
+        <button class="modal-close" id="pb-item-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="pb-item-form">
+          <div class="control">
+            <label for="pb-item-type">Type</label>
+            <select id="pb-item-type">
+              <option value="chord">Chord</option>
+              <option value="progression">Progression</option>
+            </select>
+          </div>
+          <div class="control">
+            <label for="pb-item-target">Target</label>
+            <select id="pb-item-target"></select>
+          </div>
+          <div class="control">
+            <label for="pb-item-duration">Duration (minutes)</label>
+            <input type="number" id="pb-item-duration" min="1" max="60" value="2" />
+          </div>
+          <div class="control">
+            <label for="pb-item-bpm">BPM</label>
+            <input type="number" id="pb-item-bpm" min="40" max="240" value="80" />
+          </div>
+          <div class="control">
+            <label for="pb-item-ts">Time signature</label>
+            <select id="pb-item-ts">
+              <option value="4/4">4/4</option>
+              <option value="3/4">3/4</option>
+              <option value="6/8">6/8</option>
+            </select>
+          </div>
+          <div class="control" id="pb-item-bpc-wrap">
+            <label for="pb-item-bpc">Bars / chord</label>
+            <select id="pb-item-bpc">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="4">4</option>
+            </select>
+          </div>
+        </div>
+        <div class="builder-actions">
+          <button class="btn" id="pb-item-cancel">Cancel</button>
+          <button class="btn btn-primary" id="pb-item-save">Add item</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden compat-ID elements used by old practice.js logic (kept so we don't have to refactor everything) -->
+  <div style="display: none;">
+    <button class="tab" data-tab="practice-builder">_compat</button>
+    <div id="metric-avg-min"></div>
+    <div id="metric-active-time"></div>
+    <div id="metric-streak"></div>
+    <div id="metric-best-streak"></div>
+    <div id="stat-week"></div>
+  </div>
+
+  <!-- =============== SCRIPTS =============== -->
+  <script src="{{ url_for('static', filename='js/chord-diagram.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/chord-builder.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/progression-builder.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/chord-audio.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/metronome.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/widgets.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/history.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/practice-session-builder.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/practice.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
